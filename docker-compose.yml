@@ -1,0 +1,23 @@
+services:
+  bot:
+    # ビルド設定
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    
+    # コンテナ名（--name team_splitter の代わり）
+    container_name: team_splitter
+    
+    # 環境変数の読み込み（--env-file .env の代わり）
+    env_file:
+      - .env
+    
+    # サーバー再起動時に自動で立ち上がるようにする設定
+    restart: always
+    
+    # ログ設定
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
