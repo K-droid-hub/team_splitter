@@ -1,5 +1,6 @@
 import discord, os, ssl, certifi
 from dotenv import load_dotenv
+load_dotenv()
 from discord.ext import commands
 from src.grouping import SplitTeam # コンテナ化すると src. を指定する必要あり。vscode 直実行では不要
 
@@ -20,7 +21,7 @@ class MyBot(commands.Bot):
         modules = [
             'src.modules.by_team',
             'src.modules.by_member',
-            'src.modules.by_ramdom',
+            'src.modules.by_random',
             'src.modules.add_viewer',
             'src.modules.delete_viewer',
             'src.modules.add_priority',
@@ -56,11 +57,10 @@ async def show_command(ctx: commands.Context):
     await ctx.send("HELLO")
 
 @bot.command(name="bye") # 運営用 !bye コマンド
-async def show_command(ctx: commands.Context):
+async def bye_command(ctx: commands.Context):
     await ctx.send("SHUTTING DOWN...")
     await bot.close()
 
 # 起動
-load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 bot.run(TOKEN)
