@@ -1,0 +1,56 @@
+# counter_rules.yaml
+# ------------------
+# 相手チームの属性に応じて自チームのピックを優先するルール。
+#
+# if_opponent: 相手チームの属性ごとの保有数に対する条件
+#   書き方: タグ名: "比較演算子 数値"
+#   例: CC: ">= 3"   → 相手チームにCC持ちが3体以上いる場合
+#   例: Mage: 2      → 相手チームにMageが2体以上いる場合（省略時は >=）
+#   if_opponent: {}  → 常時発動
+#
+# boost: 条件が満たされたとき、スコアを加算するタグ・ロール
+#   tags:   CSVのタグ列名（CC, Sustain, Blink など）
+#   roles:  CSVのロール列名（Fighter, Tank, Support, Mage, Assassin, ADC など）
+#   weight: スコアの加算量（大きいほど優先されやすい）
+
+rules:
+  - name: "CC多め → DisEngage/Blink優先"
+    if_opponent:
+      CC: ">= 3"
+    boost:
+      tags: ["DisEngage", "Blink"]
+      weight: 2.0
+
+  - name: "メイジ2体以上 → Tank優先"
+    if_opponent:
+      Mage: ">= 2"
+    boost:
+      roles: ["Tank"]
+      weight: 1.5
+
+  - name: "エンゲージ多め → DisEngage優先"
+    if_opponent:
+      Enguage: ">= 2"
+    boost:
+      tags: ["DisEngage"]
+      weight: 2.0
+
+  - name: "サステイン多め → CC優先"
+    if_opponent:
+      Sustain: ">= 3"
+    boost:
+      tags: ["CC"]
+      weight: 1.5
+
+  - name: "シールド系3体以上 → ブラッキー優先"
+    if_opponent:
+      "Shield|ShieldSupport": ">= 3"   # | で繋ぐと複数タグの合算になる
+    boost:
+      pokemon: ["ブラッキー"]
+      weight: 3.0
+
+  - name: "JG常時1枠確保"
+    if_opponent: {}
+    boost:
+      tags: ["JG"]
+      weight: 3.0
