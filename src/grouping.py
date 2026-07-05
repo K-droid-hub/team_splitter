@@ -12,22 +12,22 @@ class Player:
 
 class SplitTeam:
     def __init__(self):
-        self.channel_members = [] # Player クラスのインスタンスのリスト
+        self.channel_members: list[Player] = []
         self.member_size = 0
-        self.vc_err = '実行できません。ボイスチャンネルに入ってコマンドを実行してください。' 
-        
-    # VCメンバーのセット 
+        self.vc_err = '実行できません。ボイスチャンネルに入ってコマンドを実行してください。'
+
+    # VCメンバーのセット
     def set_member(self, interaction_or_ctx):
         # VCに誰かいるか確認
         if isinstance(interaction_or_ctx, discord.Interaction):
             state = interaction_or_ctx.user.voice
         else:
-            state = interaction_or_ctx.author.voice  
+            state = interaction_or_ctx.author.voice
         if state is None:
             return False
         # 現在のネームリストを取得 (bot は除く)
         current_vc_members = [
-            i.display_name for i in state.channel.members 
+            i.display_name for i in state.channel.members
             if not i.bot
         ]
         # 前回実行時からいなくなったメンバーを削除
@@ -41,15 +41,14 @@ class SplitTeam:
         self.member_size = len(self.channel_members)
         return True
 
-    def _build_table(self, ctx, factor, factor_label):
-        #チャンネルメンバーリセット & チャンネルに誰もいなかった時の処理
+    def _build_table(self, ctx, factor: int, factor_label: str) -> list[Player]:
+        """VCメンバーを読み込み、観戦者を除いたプレイヤーリストを返す。エラー時は ValueError を raise する。"""
         if self.set_member(ctx) is False:
-            return self.vc_err
+            raise ValueError(self.vc_err)
         if factor > self.member_size:
-            return f"指定した{factor_label}が多すぎます。チャンネルメンバー数に合った{factor_label}を指定してください。"
-        elif factor <= 0:
-            return f"{factor_label}は1以上を指定してください。"
-        # 観戦者を抜いたプレイヤーリスト Table を作成
+            raise ValueError(f"指定した{factor_label}が多すぎます。チャンネルメンバー数に合った{factor_label}を指定してください。")
+        if factor <= 0:
+            raise ValueError(f"{factor_label}は1以上を指定してください。")
         return [p for p in self.channel_members if not p.viewer]
 
     def _reset_temporaries(self):
@@ -60,14 +59,17 @@ class SplitTeam:
             if p.viewer and not p.locked:
                 p.viewer = False
 
+    def _find_member(self, name: str) -> Player | None:
+        return next((p for p in self.channel_members if p.name == name), None)
+
     def split_by_team_count(self, ctx, team_count: int) -> str:
-        table = self._build_table(ctx, team_count, "チーム数")
-        # エラーメッセージが返ってきた場合はそれを返す
-        if isinstance(table, str):
-            return table
+        try:
+            table = self._build_table(ctx, team_count, "チーム数")
+        except ValueError as e:
+            return str(e)
         random.shuffle(table)
         # チーム数分の空のリストを用意し、1人ずつ順番に配属していく
-        teams = [[] for _ in range(team_count)]
+        teams: list[list[str]] = [[] for _ in range(team_count)]
         for i, p in enumerate(table):
             teams[i % team_count].append(p.name)
         # 出力をまとめる
@@ -79,10 +81,10 @@ class SplitTeam:
         return '\n'.join(results)
 
     def split_by_team_size(self, ctx, team_size: int) -> str:
-        table = self._build_table(ctx, team_size, "1チームあたりの人数")
-        # エラーメッセージが返ってきた場合はそれを返す
-        if isinstance(table, str):
-            return table
+        try:
+            table = self._build_table(ctx, team_size, "1チームあたりの人数")
+        except ValueError as e:
+            return str(e)
         random.shuffle(table)
         # チーム数を計算して、チーム数分の空のリストを用意
         team_count = math.ceil(len(table) / team_size)
@@ -94,81 +96,67 @@ class SplitTeam:
         return '\n'.join(results)
 
     def split_by_lottery(self, ctx, size: int) -> str:
-        table = self._build_table(ctx, size, "人数")
-        # エラーメッセージが返ってきた場合はそれを返す
-        if isinstance(table, str):
-            return table
+        try:
+            table = self._build_table(ctx, size, "人数")
+        except ValueError as e:
+            return str(e)
         random.shuffle(table)
-        results = ["=====抽選結果====="]
-        # 優先者を引っこ抜き、先に追加する
+        # 優先者を先に確定し、残り枠をランダムから補充
         priorities = [p for p in table if p.priority]
-        for p in priorities:
-            table.remove(p)
-        while priorities and size > 0:
-            random.shuffle(priorities)
-            results.append(priorities.pop().name)
-            size -= 1
-        if size > 0:
-            for _ in range(size):
-                results.append(table.pop().name)
+        others = [p for p in table if not p.priority]
+        picked = random.sample(priorities, min(size, len(priorities)))
+        picked += others[: size - len(picked)]
+        results = ["=====抽選結果====="] + [p.name for p in picked]
         self._reset_temporaries()
         return '\n'.join(results)
 
-    def add_special(self, ctx, addName, isViewer, isPriority, isRocked):
-        # フラッグでどちらを追加するか決定
-        if isViewer:
-            main_factor_name = "観戦者"
-        else:
-            main_factor_name = "優先者"
-        #チャンネルメンバー再セット & チャンネルに誰もいなかった時の処理
-        if self.set_member(ctx) is False: 
+    def add_viewer(self, ctx, name: str, lock: bool = False) -> str:
+        if self.set_member(ctx) is False:
             return self.vc_err
-        for member in self.channel_members:
-            if member.name == addName:
-                if isViewer:
-                    if member.priority: # 優先者だった場合解除する
-                        member.priority = False
-                        member.locked = False
-                    member.viewer = True
-                elif isPriority:
-                    if member.viewer: # 観戦者だった場合解除する
-                        member.viewer = False
-                        member.locked = False
-                    member.priority = True
-                if isRocked:
-                    member.locked = True
-                    result = f"{main_factor_name}にして固定しました"
-                else:
-                    result = f"次だけ{main_factor_name}にしました"
-                result += f" \n{addName}"
-                break
-        else:
-            result = "メンバーが見つかりません"
-        return result
+        member = self._find_member(name)
+        if member is None:
+            return "メンバーが見つかりません"
+        if member.priority:  # 優先者だった場合解除する
+            member.priority = False
+            member.locked = False
+        member.viewer = True
+        member.locked = lock
+        label = "観戦者にして固定しました" if lock else "次だけ観戦者にしました"
+        return f"{label}\n{name}"
 
-    def delete_special(self, deleteName, isViewer, isPriority):
-        # フラッグでどちらを削除するか決定
-        if isViewer:
-            main_factor_name = "観戦者"
-        else:
-            main_factor_name = "優先者"
-        for member in self.channel_members:
-            if member.name == deleteName:
-                if isViewer and member.viewer:
-                    member.viewer = False
-                    member.locked = False
-                    result = f"{main_factor_name}を解除しました。"
-                elif isPriority and member.priority:
-                    member.priority = False
-                    member.locked = False
-                    result = f"{main_factor_name}を解除しました。"
-                else:
-                    result = f"そのメンバーは{main_factor_name}ではありません"
-                result += f" \n{deleteName}"
-                break
-        else:
-            result = "メンバーが見つかりません"
-        return result
+    def add_priority(self, ctx, name: str, lock: bool = False) -> str:
+        if self.set_member(ctx) is False:
+            return self.vc_err
+        member = self._find_member(name)
+        if member is None:
+            return "メンバーが見つかりません"
+        if member.viewer:  # 観戦者だった場合解除する
+            member.viewer = False
+            member.locked = False
+        member.priority = True
+        member.locked = lock
+        label = "優先者にして固定しました" if lock else "次だけ優先者にしました"
+        return f"{label}\n{name}"
+
+    def delete_viewer(self, name: str) -> str:
+        member = self._find_member(name)
+        if member is None:
+            return "メンバーが見つかりません"
+        if not member.viewer:
+            return f"そのメンバーは観戦者ではありません\n{name}"
+        member.viewer = False
+        member.locked = False
+        return f"観戦者を解除しました。\n{name}"
+
+    def delete_priority(self, name: str) -> str:
+        member = self._find_member(name)
+        if member is None:
+            return "メンバーが見つかりません"
+        if not member.priority:
+            return f"そのメンバーは優先者ではありません\n{name}"
+        member.priority = False
+        member.locked = False
+        return f"優先者を解除しました。\n{name}"
 
     def reset_all(self):
         self.channel_members.clear()

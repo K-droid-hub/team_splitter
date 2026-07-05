@@ -15,7 +15,7 @@ class AddPriority(commands.Cog):
 
     async def priority_member(self, interaction: discord.Interaction, 名前: str, ロック: str = "しない"):
         isRocked = ロック == "する"
-        results = self.split_team.add_special(interaction, 名前, isViewer=False, isPriority=True, isRocked=isRocked)
+        results = self.split_team.add_priority(interaction, 名前, lock=isRocked)
         embed = discord.Embed(color=discord.Color.blue())
         embed.add_field(name="優先者登録", value=results, inline=False)
         await interaction.response.send_message(embed=embed)

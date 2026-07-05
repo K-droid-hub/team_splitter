@@ -16,7 +16,7 @@ class ByRandom(commands.Cog):
         priorities = [m.strip() for m in 優先者.split(',') if m.strip()] # もし優先メンバーがあればリストに追加
         if priorities:
             for priority in priorities:
-                self.split_team.add_special(interaction, addName=priority, isViewer=False, isPriority=True, isRocked=False)
+                self.split_team.add_priority(interaction, priority)
         result = self.split_team.split_by_lottery(interaction, 人数)
         embed = discord.Embed(color=discord.Color.purple())
         embed.add_field(name="人数分抽選", value=result, inline=False)

@@ -14,7 +14,7 @@ class AddViewer(commands.Cog):
 
     async def add_viewer(self, interaction: discord.Interaction, 名前: str, ロック: str = "しない"):
         isRocked = ロック == "する"
-        results = self.split_team.add_special(interaction, addName=名前, isViewer=True, isPriority=False, isRocked=isRocked)
+        results = self.split_team.add_viewer(interaction, 名前, lock=isRocked)
         embed = discord.Embed(color=discord.Color.blue())
         embed.add_field(name="観戦者登録", value=results, inline=False)
         await interaction.response.send_message(embed=embed)
