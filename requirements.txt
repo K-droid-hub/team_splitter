@@ -1,3 +1,5 @@
 discord.py
 dotenv
 certifi
+PyNaCl
+aiohttp
