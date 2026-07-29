@@ -32,12 +32,20 @@ class MyBot(commands.Bot):
             'src.modules.tts',
             'src.modules.panel',
         ]
+        failed_modules = []
         for module in modules:
             try:
                 await self.load_extension(module)
-                print (f"✅ Loaded module: {module}")
+                print(f"✅ Loaded module: {module}")
             except Exception as e:
                 print(f"❌ Failed to load {module}: {e}")
+                failed_modules.append(module)
+
+        # 1 つでもロードに失敗したら sync せずに中断する。
+        # sync(guild=...) はツリーの内容でギルドのコマンド一覧を丸ごと上書きするため、
+        # 欠けたツリーで sync するとロードできなかったコマンドが Discord 側から消える。
+        if failed_modules:
+            raise RuntimeError(f"モジュールのロードに失敗したため sync を中断します: {failed_modules}")
 
         # Cogのロード完了後に、ギルドごとにsync
         guild_ids_raw = os.getenv("GUILD_IDS", "")
