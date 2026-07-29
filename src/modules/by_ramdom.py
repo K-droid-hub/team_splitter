@@ -12,6 +12,7 @@ class ByRandom(commands.Cog):
 
     @app_commands.command(name="人数分抽選")
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
+
     @app_commands.describe(人数 = "任意(default: 5)", 優先者 = "任意(例: user1,user2)")
 
     async def by_random(self, interaction: discord.Interaction, 人数: int = 5, 優先者: str = ""):

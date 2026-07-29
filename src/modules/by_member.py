@@ -12,6 +12,7 @@ class ByMember(commands.Cog):
 
     @app_commands.command(name="1チームあたりの人数で分ける")
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
+
     @app_commands.describe(人数 = "任意(default: 5)")
 
     async def by_member(self, interaction: discord.Interaction, 人数:int = 5):

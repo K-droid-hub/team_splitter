@@ -11,13 +11,42 @@ services:
     # 環境変数の読み込み（--env-file .env の代わり）
     env_file:
       - .env
-    
+
+    # VOICEVOX エンジンの接続先（compose 内のサービス名で解決）
+    environment:
+      - VOICEVOX_URL=http://voicevox:50021
+      # 読み上げ声設定の DB ファイル置き場（下の named volume 上）
+      - VOICE_DB_PATH=/app/data/voices.db
+
+    # 読み上げ声設定 DB を永続化する。リビルドしても設定が消えないようにする
+    volumes:
+      - voice_data:/app/data
+
+    # VOICEVOX エンジンの起動を待ってから立ち上げる
+    depends_on:
+      - voicevox
+
     # サーバー再起動時に自動で立ち上がるようにする設定
     restart: always
-    
+
     # ログ設定
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+  # 読み上げ用の音声合成エンジン
+  voicevox:
+    image: voicevox/voicevox_engine:cpu-latest
+    container_name: voicevox_engine
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# 読み上げ声設定を保持する named volume
+volumes:
+  voice_data:

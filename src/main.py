@@ -2,6 +2,7 @@ import discord, os, ssl, certifi
 from dotenv import load_dotenv
 from discord.ext import commands
 from src.grouping import SplitTeam # コンテナ化すると src. を指定する必要あり。vscode 直実行では不要
+from src.tts_manager import TtsManager
 
 ssl_context = ssl.create_default_context(cafile=certifi.where())
 ssl._create_default_https_context = lambda: ssl_context
@@ -13,7 +14,8 @@ class MyBot(commands.Bot):
         intents.voice_states = True # VC 内のメンバー取得
         intents.members = True # サーバーメンバー取得
         super().__init__(command_prefix="!", intents=intents)
-        self.split_team = SplitTeam() 
+        self.split_team = SplitTeam()
+        self.tts_manager = TtsManager()
 
     async def setup_hook(self):
         # モジュールのロード
@@ -27,6 +29,7 @@ class MyBot(commands.Bot):
             'src.modules.delete_priority',
             'src.modules.show_all',
             'src.modules.reset_all',
+            'src.modules.tts',
         ]
         for module in modules:
             try:
@@ -50,6 +53,8 @@ class MyBot(commands.Bot):
         print(f"PID: {os.getpid()}")
         print('------------')
 
+# TtsManager 生成時に .env の VOICEVOX 設定を読めるよう、bot 生成前にロードする
+load_dotenv()
 bot = MyBot()
 @bot.command(name="hello") # 運営用 !hello コマンド
 async def show_command(ctx: commands.Context):
@@ -61,6 +66,5 @@ async def show_command(ctx: commands.Context):
     await bot.close()
 
 # 起動
-load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 bot.run(TOKEN)
