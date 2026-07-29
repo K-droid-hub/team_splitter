@@ -43,10 +43,11 @@
 ## 読み上げのための追加準備
 読み上げ機能には VOICEVOX エンジンと ffmpeg が必要です。
 
+- Discord は 2026-03-02 に voice の DAVE(E2E 暗号化)を必須化したため、bot が voice に参加するには DAVE 対応版の discord.py(2.7 以降)と `davey` パッケージが必要です。どちらも `requirements.txt` に含めています(未対応版では close code 4017 で接続拒否されます)。
 - `.env` の `VOICEVOX_URL`(既定 `http://voicevox:50021`)で VOICEVOX エンジンの接続先を、`VOICEVOX_SPEAKER`(既定 `3`)で既定話者を指定します。
 - Docker Compose で起動する場合、`voicevox` サービスが自動で立ち上がり、ffmpeg も bot イメージに同梱されます。追加の準備は不要です。
 - ローカルで直接実行する場合は、別途以下が必要です。
   - VOICEVOX エンジン: `docker run --rm -p 50021:50021 voicevox/voicevox_engine:cpu-latest`
   - ffmpeg: `brew install ffmpeg`(macOS の場合)
-  - Python 依存: `pip install -r requirements.txt`(PyNaCl を含む)
+  - Python 依存: `pip install -r requirements.txt`(PyNaCl・davey を含む)
   - このとき `.env` の `VOICEVOX_URL` は `http://localhost:50021` にしてください。

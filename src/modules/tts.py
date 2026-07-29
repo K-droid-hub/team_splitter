@@ -36,7 +36,19 @@ class Tts(commands.Cog):
                 "すでに読み上げ中です。", ephemeral=True
             )
             return
-        voice_client = await interaction.user.voice.channel.connect()
+        # VC 接続に時間がかかっても 3 秒制限で落ちないよう応答を保留する
+        await interaction.response.defer()
+        try:
+            voice_client = await interaction.user.voice.channel.connect()
+        except Exception as e:
+            # 接続失敗を握りつぶさず、原因の手掛かりとともに通知する
+            print(f"❌ VC 接続に失敗: {e}")
+            await interaction.followup.send(
+                "ボイスチャンネルへの接続に失敗しました。"
+                "PyNaCl・ffmpeg が導入されているか確認してください。",
+                ephemeral=True,
+            )
+            return
         self.tts_manager.start_reading(
             interaction.guild_id,
             interaction.channel_id,
@@ -49,7 +61,7 @@ class Tts(commands.Cog):
             value="このチャンネルの発言を読み上げます。",
             inline=False,
         )
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="読み上げ終了")
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
@@ -85,7 +97,10 @@ class Tts(commands.Cog):
         if not self.tts_manager.is_target_channel(message.guild.id, message.channel.id):
             return
         self.tts_manager.enqueue_message(
-            message.guild.id, message.content, message.author.id
+            message.guild.id,
+            message.content,
+            message.author.id,
+            message.author.display_name,
         )
 
     @commands.Cog.listener()

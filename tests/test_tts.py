@@ -64,27 +64,29 @@ def test_get_speaker_falls_back_to_default_then_uses_setting():
     assert mgr.get_speaker(user_id=42) == 8
 
 
-def test_enqueue_message_uses_author_speaker_and_sanitizes():
+def test_enqueue_message_prefixes_nickname_and_sanitizes():
     mgr = TtsManager(engine=FakeEngine(default_speaker=3))
     mgr.guild_states[1] = make_state()
     mgr.set_speaker(user_id=42, speaker_id=8)
-    mgr.enqueue_message(1, "やあ https://x.com", user_id=42)
+    mgr.enqueue_message(1, "やあ https://x.com", user_id=42, display_name="たろう")
     text, speaker = mgr.guild_states[1].queue.get_nowait()
-    assert text == "やあ URL 省略"
+    # 発言者ニックネームを先頭に付け、本文をサニタイズすること
+    assert text == "たろう、やあ URL 省略"
     assert speaker == 8
 
 
 def test_enqueue_skips_when_empty_after_sanitize():
     mgr = TtsManager(engine=FakeEngine())
     mgr.guild_states[1] = make_state()
-    mgr.enqueue_message(1, "<@123>", user_id=42)
+    # 本文が空になるなら、名前だけ読み上げず積まないこと
+    mgr.enqueue_message(1, "<@123>", user_id=42, display_name="たろう")
     assert mgr.guild_states[1].queue.empty()
 
 
 def test_enqueue_ignored_when_not_reading():
     mgr = TtsManager(engine=FakeEngine())
     # 例外を出さず、単に無視されること
-    mgr.enqueue_message(999, "test", user_id=1)
+    mgr.enqueue_message(999, "test", user_id=1, display_name="foo")
 
 
 # ---- TtsManager: ライフサイクル ----
@@ -113,7 +115,7 @@ def test_play_one_synthesizes_and_plays_with_speaker():
         # play は完了コールバックを即座に呼び、再生完了を模擬する
         vc.play = Mock(side_effect=lambda source, after: after(None))
         state = GuildTtsState(text_channel_id=1, voice_client=vc)
-        with patch("src.tts_manager.discord.FFmpegPCMAudio", return_value=Mock()):
+        with patch("src.tts_manager.discord.FFmpegOpusAudio", return_value=Mock()):
             await mgr._play_one(state, "こんにちは", 5)
         assert engine.calls == [("こんにちは", 5)]
         vc.play.assert_called_once()

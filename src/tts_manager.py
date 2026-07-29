@@ -62,21 +62,25 @@ class TtsManager:
         if state.voice_client is not None and state.voice_client.is_connected():
             await state.voice_client.disconnect()
 
-    # 発言者の話者でテキストを読み上げキューへ積む
-    def enqueue_message(self, guild_id, text, user_id):
-        self._enqueue(guild_id, text, self.get_speaker(user_id))
+    # 発言者名を先頭に付け、発言者の話者でテキストを読み上げキューへ積む
+    def enqueue_message(self, guild_id, text, user_id, display_name):
+        body = sanitize_text(text)
+        # サニタイズ後に本文が空なら、名前だけ読み上げても無意味なので積まない
+        if not body:
+            return
+        reading = f"{display_name}、{body}"
+        self._put(guild_id, reading, self.get_speaker(user_id))
 
     # 入退室通知など、既定話者で読み上げるテキストを積む
     def enqueue_notice(self, guild_id, text):
-        self._enqueue(guild_id, text, self.engine.default_speaker)
+        body = sanitize_text(text)
+        if not body:
+            return
+        self._put(guild_id, body, self.engine.default_speaker)
 
-    def _enqueue(self, guild_id, text, speaker):
+    def _put(self, guild_id, text, speaker):
         state = self.guild_states.get(guild_id)
         if state is None:
-            return
-        text = sanitize_text(text)
-        # サニタイズ後に空になった発言は読み上げない
-        if not text:
             return
         state.queue.put_nowait((text, speaker))
 
@@ -94,7 +98,8 @@ class TtsManager:
     # 1 件分の音声を合成して再生し、再生完了まで待つ
     async def _play_one(self, state, text, speaker):
         wav = await self.engine.synthesize_speech(text, speaker)
-        source = discord.FFmpegPCMAudio(io.BytesIO(wav), pipe=True)
+        # Opus エンコードを ffmpeg 側に任せ、Python 側の libopus ロードを不要にする
+        source = discord.FFmpegOpusAudio(io.BytesIO(wav), pipe=True)
         loop = asyncio.get_running_loop()
         done = asyncio.Event()
         state.voice_client.play(

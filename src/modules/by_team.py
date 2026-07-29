@@ -12,7 +12,7 @@ class ByTeam(commands.Cog):
 
     @app_commands.command(name="チーム数で分ける")
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
-    @app_commands.describe("チーム数: 任意(default: 2)")
+    @app_commands.describe(チーム数="任意(default: 2)")
 
     async def by_team(self, interaction: discord.Interaction, チーム数: int = 2):
         result = self.split_team.split(interaction, teamCount=チーム数, teamSize=0)
