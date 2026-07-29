@@ -2,6 +2,8 @@ import discord, os
 from discord import app_commands
 from discord.ext import commands
 
+from src.modules.tts import SPEAKER_CHOICES  # 読み上げ声設定の話者一覧を共有
+
 MAX_NUMBER_BUTTONS = 5  # 数値ボタンの最大表示数
 MEMBER_BUTTON_LIMIT_SINGLE = 20  # 登録系(単一選択 + 操作ボタン)でボタン表示する上限
 MEMBER_BUTTON_LIMIT_MULTI = 15  # 抽選(数値行 + 複数選択 + 実行)でボタン表示する上限
@@ -257,6 +259,25 @@ class ConfirmResetView(discord.ui.View):
         await interaction.response.edit_message(content="キャンセルしました", view=None)
 
 
+# ---- 読み上げ声設定: 話者を押下即設定(本人のみ) ----
+class VoiceButton(discord.ui.Button):
+    def __init__(self, speaker_name, speaker_value):
+        super().__init__(label=speaker_name, style=discord.ButtonStyle.primary)
+        self.speaker_name = speaker_name
+        self.speaker_value = speaker_value
+
+    async def callback(self, interaction):
+        await self.view.cog.run_set_voice(interaction, self.speaker_value, self.speaker_name)
+
+
+class VoiceSelectView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=120)
+        self.cog = cog
+        for choice in SPEAKER_CHOICES:
+            self.add_item(VoiceButton(choice.name, choice.value))
+
+
 # ---- 常駐パネル(永続 View) ----
 class PanelView(discord.ui.View):
     def __init__(self, cog):
@@ -307,6 +328,11 @@ class PanelView(discord.ui.View):
                        custom_id="panel:reset", row=3)
     async def reset(self, interaction, button):
         await self.cog.open_reset(interaction)
+
+    @discord.ui.button(label="読み上げ声設定", style=discord.ButtonStyle.secondary,
+                       custom_id="panel:set_voice", row=4)
+    async def set_voice(self, interaction, button):
+        await self.cog.open_voice(interaction)
 
 
 class PanelCog(commands.Cog):
@@ -406,6 +432,20 @@ class PanelCog(commands.Cog):
             "観戦者・優先者を全て解除します。よろしいですか？",
             view=ConfirmResetView(self),
             ephemeral=True,
+        )
+
+    async def open_voice(self, interaction):
+        await interaction.response.send_message(
+            "読み上げの声を選んでください", view=VoiceSelectView(self), ephemeral=True
+        )
+
+    # 読み上げ声は本人だけの設定なので、公開せず ephemeral で完結させる
+    async def run_set_voice(self, interaction, speaker_value, speaker_name):
+        self.bot.tts_manager.set_speaker(
+            interaction.user.id, speaker_value, interaction.user.display_name
+        )
+        await interaction.response.edit_message(
+            content=f"あなたの声を「{speaker_name}」に設定しました。", view=None
         )
 
     # ---- 実行本体 ----
