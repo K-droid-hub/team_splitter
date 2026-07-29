@@ -81,7 +81,9 @@ class Tts(commands.Cog):
     @app_commands.describe(話者="あなたの発言を読み上げる声")
     @app_commands.choices(話者=SPEAKER_CHOICES)
     async def set_voice(self, interaction: discord.Interaction, 話者: app_commands.Choice[int]):
-        self.tts_manager.set_speaker(interaction.user.id, 話者.value)
+        self.tts_manager.set_speaker(
+            interaction.user.id, 話者.value, interaction.user.display_name
+        )
         embed = discord.Embed(color=discord.Color.green())
         embed.add_field(
             name="読み上げ声設定",

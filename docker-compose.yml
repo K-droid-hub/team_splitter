@@ -15,6 +15,12 @@ services:
     # VOICEVOX エンジンの接続先（compose 内のサービス名で解決）
     environment:
       - VOICEVOX_URL=http://voicevox:50021
+      # 読み上げ声設定の DB ファイル置き場（下の named volume 上）
+      - VOICE_DB_PATH=/app/data/voices.db
+
+    # 読み上げ声設定 DB を永続化する。リビルドしても設定が消えないようにする
+    volumes:
+      - voice_data:/app/data
 
     # VOICEVOX エンジンの起動を待ってから立ち上げる
     depends_on:
@@ -40,3 +46,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+# 読み上げ声設定を保持する named volume
+volumes:
+  voice_data:

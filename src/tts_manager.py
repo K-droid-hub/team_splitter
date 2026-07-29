@@ -5,6 +5,7 @@ import io
 import discord
 
 from src.tts_engine import VoicevoxEngine, sanitize_text
+from src.user_voice_store import UserVoiceStore
 
 
 @dataclasses.dataclass
@@ -17,12 +18,13 @@ class GuildTtsState:
 
 
 class TtsManager:
-    def __init__(self, engine=None):
+    def __init__(self, engine=None, store=None):
         self.engine = engine or VoicevoxEngine()
+        self.store = store or UserVoiceStore()
         # ギルド単位の読み上げ状態
         self.guild_states = {}
-        # 発言者 (user_id) ごとの話者 ID
-        self.user_speakers = {}
+        # 発言者 (user_id) ごとの話者 ID。永続化済みの設定を読み込んでおく
+        self.user_speakers = self.store.load_all_speakers()
 
     def is_reading(self, guild_id):
         return guild_id in self.guild_states
@@ -35,8 +37,10 @@ class TtsManager:
         state = self.guild_states.get(guild_id)
         return state is not None and state.notify_join_leave
 
-    def set_speaker(self, user_id, speaker_id):
+    # 話者設定をメモリと DB の両方へ反映し、再起動後も残るようにする
+    def set_speaker(self, user_id, speaker_id, display_name=None):
         self.user_speakers[user_id] = speaker_id
+        self.store.set_speaker(user_id, speaker_id, display_name)
 
     def get_speaker(self, user_id):
         # 未設定の発言者は既定話者で読み上げる

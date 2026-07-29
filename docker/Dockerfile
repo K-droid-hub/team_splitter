@@ -15,7 +15,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src
 
-RUN useradd -m botuser
+# 読み上げ設定の DB を置くディレクトリ。空の named volume 初回マウント時に
+# この所有権が引き継がれ、非 root の botuser でも書き込めるようにする
+RUN useradd -m botuser \
+    && mkdir -p /app/data \
+    && chown -R botuser:botuser /app/data
 USER botuser
 
 CMD ["python", "-m", "src.main"]

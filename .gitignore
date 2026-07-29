@@ -5,3 +5,4 @@ __pycache__/
 *.log
 起動コマンド.txt
 ignores/
+data/

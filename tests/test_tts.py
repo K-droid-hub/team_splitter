@@ -3,6 +3,12 @@ from unittest.mock import Mock, patch
 
 from src.tts_engine import VoicevoxEngine, sanitize_text
 from src.tts_manager import GuildTtsState, TtsManager
+from src.user_voice_store import UserVoiceStore
+
+
+# テスト用に、ファイルを作らないインメモリ DB のストアを返す
+def make_store():
+    return UserVoiceStore(db_path=":memory:")
 
 
 class FakeEngine:
@@ -41,7 +47,7 @@ def make_state(channel_id=100, notify=False):
 
 
 def test_is_target_channel_matches_only_registered_channel():
-    mgr = TtsManager(engine=FakeEngine())
+    mgr = TtsManager(engine=FakeEngine(), store=make_store())
     mgr.guild_states[1] = make_state(channel_id=100)
     assert mgr.is_target_channel(1, 100) is True
     assert mgr.is_target_channel(1, 999) is False
@@ -49,7 +55,7 @@ def test_is_target_channel_matches_only_registered_channel():
 
 
 def test_should_notify_reflects_flag():
-    mgr = TtsManager(engine=FakeEngine())
+    mgr = TtsManager(engine=FakeEngine(), store=make_store())
     mgr.guild_states[1] = make_state(notify=True)
     mgr.guild_states[2] = make_state(notify=False)
     assert mgr.should_notify(1) is True
@@ -58,14 +64,14 @@ def test_should_notify_reflects_flag():
 
 
 def test_get_speaker_falls_back_to_default_then_uses_setting():
-    mgr = TtsManager(engine=FakeEngine(default_speaker=3))
+    mgr = TtsManager(engine=FakeEngine(default_speaker=3), store=make_store())
     assert mgr.get_speaker(user_id=42) == 3
     mgr.set_speaker(user_id=42, speaker_id=8)
     assert mgr.get_speaker(user_id=42) == 8
 
 
 def test_enqueue_message_prefixes_nickname_and_sanitizes():
-    mgr = TtsManager(engine=FakeEngine(default_speaker=3))
+    mgr = TtsManager(engine=FakeEngine(default_speaker=3), store=make_store())
     mgr.guild_states[1] = make_state()
     mgr.set_speaker(user_id=42, speaker_id=8)
     mgr.enqueue_message(1, "やあ https://x.com", user_id=42, display_name="たろう")
@@ -76,7 +82,7 @@ def test_enqueue_message_prefixes_nickname_and_sanitizes():
 
 
 def test_enqueue_skips_when_empty_after_sanitize():
-    mgr = TtsManager(engine=FakeEngine())
+    mgr = TtsManager(engine=FakeEngine(), store=make_store())
     mgr.guild_states[1] = make_state()
     # 本文が空になるなら、名前だけ読み上げず積まないこと
     mgr.enqueue_message(1, "<@123>", user_id=42, display_name="たろう")
@@ -84,16 +90,44 @@ def test_enqueue_skips_when_empty_after_sanitize():
 
 
 def test_enqueue_ignored_when_not_reading():
-    mgr = TtsManager(engine=FakeEngine())
+    mgr = TtsManager(engine=FakeEngine(), store=make_store())
     # 例外を出さず、単に無視されること
     mgr.enqueue_message(999, "test", user_id=1, display_name="foo")
+
+
+# ---- 話者設定の永続化 ----
+
+def test_set_speaker_persists_and_reloads_into_new_manager():
+    # 同一 DB を共有し、再起動で TtsManager を作り直した状況を模擬する
+    store = make_store()
+    mgr = TtsManager(engine=FakeEngine(), store=store)
+    mgr.set_speaker(user_id=42, speaker_id=8, display_name="たろう")
+
+    # 同じ DB から作り直した TtsManager に設定が復元されること
+    reloaded = TtsManager(engine=FakeEngine(), store=store)
+    assert reloaded.get_speaker(user_id=42) == 8
+
+
+def test_store_set_speaker_upserts_latest_value():
+    store = make_store()
+    store.set_speaker(user_id=1, speaker_id=2, display_name="a")
+    store.set_speaker(user_id=1, speaker_id=9, display_name="a")
+    # 同一ユーザーは重複せず最新の話者で上書きされること
+    assert store.load_all_speakers() == {1: 9}
+
+
+def test_store_persists_to_file_across_connections(tmp_path):
+    db_path = str(tmp_path / "voices.db")
+    UserVoiceStore(db_path=db_path).set_speaker(user_id=7, speaker_id=3)
+    # 別接続 (= コンテナ再起動相当) で開き直しても残っていること
+    assert UserVoiceStore(db_path=db_path).load_all_speakers() == {7: 3}
 
 
 # ---- TtsManager: ライフサイクル ----
 
 def test_start_and_stop_reading_lifecycle():
     async def scenario():
-        mgr = TtsManager(engine=FakeEngine())
+        mgr = TtsManager(engine=FakeEngine(), store=make_store())
         vc = Mock()
         vc.is_connected.return_value = True
         vc.disconnect = Mock(return_value=asyncio.sleep(0))
@@ -110,7 +144,7 @@ def test_start_and_stop_reading_lifecycle():
 def test_play_one_synthesizes_and_plays_with_speaker():
     async def scenario():
         engine = FakeEngine()
-        mgr = TtsManager(engine=engine)
+        mgr = TtsManager(engine=engine, store=make_store())
         vc = Mock()
         # play は完了コールバックを即座に呼び、再生完了を模擬する
         vc.play = Mock(side_effect=lambda source, after: after(None))

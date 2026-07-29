@@ -22,6 +22,8 @@
 # 読み上げ機能
 `/読み上げ開始` で bot がボイスチャットに参加し、VOICEVOX で発言を音声合成して読み上げます。音声合成には別途 VOICEVOX エンジンが必要です(下記「運用」参照)。
 
+`/読み上げ声設定` で選んだ声は SQLite (`data/voices.db`) に保存され、コンテナをリビルド・再起動しても保持されます。Docker Compose では `voice_data` という named volume に載せているため、`docker compose up --build` で作り直しても設定は消えません。保存先は `.env` の `VOICE_DB_PATH`(既定 `data/voices.db`)で変更できます。
+
 # Bot 権限
 
 ## 一般権限
