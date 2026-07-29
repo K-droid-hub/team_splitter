@@ -30,6 +30,7 @@ class MyBot(commands.Bot):
             'src.modules.show_all',
             'src.modules.reset_all',
             'src.modules.tts',
+            'src.modules.panel',
         ]
         for module in modules:
             try:
