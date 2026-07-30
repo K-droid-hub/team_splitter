@@ -7,7 +7,7 @@ from src.modules.tts import SPEAKER_CHOICES  # 読み上げ声設定の話者一
 MAX_NUMBER_BUTTONS = 5  # 数値ボタンの最大表示数
 MEMBER_BUTTON_LIMIT_SINGLE = 20  # 登録系(単一選択 + 操作ボタン)でボタン表示する上限
 MEMBER_BUTTON_LIMIT_MULTI = 15  # 抽選(数値行 + 複数選択 + 実行)でボタン表示する上限
-MEMBER_BUTTON_LIMIT_DELETE = 25  # 解除系(選択のみ)でボタン表示する上限
+MEMBER_BUTTON_LIMIT_DELETE = 20  # 解除系(複数選択 + 実行)でボタン表示する上限
 
 
 def build_number_values(mode, member_size):
@@ -256,26 +256,50 @@ class RegisterView(discord.ui.View):
         self.add_item(RegisterExecuteButton(row=4))
 
 
-# ---- 観戦者 / 優先者 解除: 対象を押下即実行 ----
-class DeleteMemberButton(discord.ui.Button):
+# ---- 観戦者 / 優先者 解除: 対象(複数) + 実行 ----
+class DeleteToggleButton(discord.ui.Button):
     def __init__(self, name, row):
-        super().__init__(label=name, style=discord.ButtonStyle.primary, row=row)
+        super().__init__(label=name, style=discord.ButtonStyle.secondary, row=row)
         self.name = name
 
     async def callback(self, interaction):
         view = self.view
-        await view.cog.run_delete(interaction, view.is_viewer, self.name)
+        if self.name in view.selected_names:
+            view.selected_names.discard(self.name)
+            self.style = discord.ButtonStyle.secondary
+        else:
+            view.selected_names.add(self.name)
+            self.style = discord.ButtonStyle.success
+        await interaction.response.edit_message(view=view)
 
 
-class DeleteMemberSelect(discord.ui.Select):
+class DeleteMultiSelect(discord.ui.Select):
+    # メンバーが多くボタンで収まらない場合のフォールバック
     def __init__(self, names, row):
         options = [discord.SelectOption(label=name) for name in names[:25]]
         super().__init__(
-            placeholder="解除する対象を選択", min_values=1, max_values=1, options=options, row=row
+            placeholder="解除する対象を選択(複数可)",
+            min_values=0,
+            max_values=len(options),
+            options=options,
+            row=row,
         )
 
     async def callback(self, interaction):
-        await self.view.cog.run_delete(interaction, self.view.is_viewer, self.values[0])
+        self.view.selected_names = set(self.values)
+        await interaction.response.defer()
+
+
+class DeleteExecuteButton(discord.ui.Button):
+    def __init__(self, row):
+        super().__init__(label="実行", style=discord.ButtonStyle.primary, row=row)
+
+    async def callback(self, interaction):
+        view = self.view
+        if not view.selected_names:
+            await interaction.response.send_message("対象を選んでください", ephemeral=True)
+            return
+        await view.cog.run_delete(interaction, view.is_viewer, list(view.selected_names))
 
 
 class DeleteView(discord.ui.View):
@@ -283,11 +307,15 @@ class DeleteView(discord.ui.View):
         super().__init__(timeout=120)
         self.cog = cog
         self.is_viewer = is_viewer
+        self.selected_names = set()
         if len(member_names) <= MEMBER_BUTTON_LIMIT_DELETE:
             for i, name in enumerate(member_names):
-                self.add_item(DeleteMemberButton(name, row=i // 5))
+                self.add_item(DeleteToggleButton(name, row=i // 5))
+            execute_row = 4
         else:
-            self.add_item(DeleteMemberSelect(member_names, row=0))
+            self.add_item(DeleteMultiSelect(member_names, row=0))
+            execute_row = 1
+        self.add_item(DeleteExecuteButton(row=execute_row))
 
 
 # ---- 読み上げ声設定: 話者を押下即設定(本人のみ) ----
@@ -458,7 +486,7 @@ class PanelCog(commands.Cog):
         view = DeleteView(self, is_viewer, member_names)
         label = "観戦者" if is_viewer else "優先者"
         await interaction.response.send_message(
-            f"解除する{label}を選んでください", view=view, ephemeral=True
+            f"解除する{label}を選んで実行してください(複数可)", view=view, ephemeral=True
         )
 
     async def open_voice(self, interaction):
@@ -504,10 +532,13 @@ class PanelCog(commands.Cog):
         title = "観戦者登録" if is_viewer else "優先者登録"
         await self.finish_sub(interaction, make_special_embed(title, result))
 
-    async def run_delete(self, interaction, is_viewer, name):
-        result = self.split_team.delete_special(name, isViewer=is_viewer, isPriority=not is_viewer)
+    async def run_delete(self, interaction, is_viewer, names):
+        results = [
+            self.split_team.delete_special(name, isViewer=is_viewer, isPriority=not is_viewer)
+            for name in names
+        ]
         title = "観戦者解除" if is_viewer else "優先者解除"
-        await self.finish_sub(interaction, make_special_embed(title, result))
+        await self.finish_sub(interaction, make_special_embed(title, "\n".join(results)))
 
     async def run_show_all(self, interaction):
         self.split_team.set_member(interaction)
