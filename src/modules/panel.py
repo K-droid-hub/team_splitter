@@ -2,6 +2,7 @@ import discord, os
 from discord import app_commands
 from discord.ext import commands
 
+from src.grouping import format_member_list  # 一覧表示の意気込み整形を共有
 from src.modules.tts import SPEAKER_CHOICES  # 読み上げ声設定の話者一覧を共有
 
 MAX_NUMBER_BUTTONS = 5  # 数値ボタンの最大表示数
@@ -338,6 +339,26 @@ class VoiceSelectView(discord.ui.View):
             self.add_item(VoiceButton(choice.name, choice.value))
 
 
+# ---- 意気込み入力(モーダル) ----
+class AspirationModal(discord.ui.Modal, title="意気込みを入力"):
+    def __init__(self, cog, current=""):
+        super().__init__()
+        self.cog = cog
+        # 既存の意気込みを初期値に入れ、空にして送れば削除できるようにする
+        self.aspiration = discord.ui.TextInput(
+            label="意気込み",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=100,
+            default=current,
+            placeholder="例: 今日は絶対に勝つ!",
+        )
+        self.add_item(self.aspiration)
+
+    async def on_submit(self, interaction):
+        await self.cog.run_set_aspiration(interaction, self.aspiration.value)
+
+
 # ---- 常駐パネル(永続 View) ----
 class PanelView(discord.ui.View):
     def __init__(self, cog, is_reading=False):
@@ -390,6 +411,11 @@ class PanelView(discord.ui.View):
                        custom_id="panel:show_all", row=3)
     async def show_all(self, interaction, button):
         await self.cog.run_show_all(interaction)
+
+    @discord.ui.button(label="意気込み設定", style=discord.ButtonStyle.secondary,
+                       custom_id="panel:aspiration", row=3)
+    async def aspiration(self, interaction, button):
+        await self.cog.open_aspiration(interaction)
 
     @discord.ui.button(label="読み上げ声設定", style=discord.ButtonStyle.secondary,
                        custom_id="panel:set_voice", row=4)
@@ -521,6 +547,21 @@ class PanelCog(commands.Cog):
             "読み上げの声を選んでください", view=VoiceSelectView(self), ephemeral=True
         )
 
+    # 意気込みは VC 参加を問わずいつでも編集できるよう、押下で即モーダルを開く
+    async def open_aspiration(self, interaction):
+        key = (interaction.guild_id, interaction.user.display_name)
+        current = self.split_team.aspirations_by_name.get(key, "")
+        await interaction.response.send_modal(AspirationModal(self, current))
+
+    # 意気込みを保存する。改行や余分な空白は 1 行に潰し、空なら削除扱いにする
+    async def run_set_aspiration(self, interaction, text):
+        text = " ".join(text.split())
+        self.split_team.set_aspiration(
+            interaction.guild_id, interaction.user.id, interaction.user.display_name, text
+        )
+        message = "意気込みを設定しました。" if text else "意気込みを削除しました。"
+        await interaction.response.send_message(message, ephemeral=True)
+
     # 説明書は押した本人だけに見せ、チャンネルを汚さないよう ephemeral で出す
     async def open_manual(self, interaction):
         await interaction.response.send_message(embed=make_manual_embed(), ephemeral=True)
@@ -606,11 +647,11 @@ class PanelCog(commands.Cog):
     async def run_show_all(self, interaction):
         self.split_team.set_member(interaction)
         members = self.split_team.channel_members
-        rocked_viewers = ", ".join([m.name for m in members if m.viewer and m.rockedFlag]) or "なし"
-        viewers = ", ".join([m.name for m in members if m.viewer and not m.rockedFlag]) or "なし"
-        rocked_priorities = ", ".join([m.name for m in members if m.priority and m.rockedFlag]) or "なし"
-        priorities = ", ".join([m.name for m in members if m.priority and not m.rockedFlag]) or "なし"
-        channel_members = ", ".join([m.name for m in members if not m.viewer and not m.priority]) or "なし"
+        rocked_viewers = format_member_list([m for m in members if m.viewer and m.rockedFlag])
+        viewers = format_member_list([m for m in members if m.viewer and not m.rockedFlag])
+        rocked_priorities = format_member_list([m for m in members if m.priority and m.rockedFlag])
+        priorities = format_member_list([m for m in members if m.priority and not m.rockedFlag])
+        channel_members = format_member_list([m for m in members if not m.viewer and not m.priority])
         embed = discord.Embed(title="一覧表示", color=discord.Color.red())
         embed.add_field(name="チャンネルメンバー", value=channel_members, inline=False)
         embed.add_field(name="固定観戦者", value=rocked_viewers, inline=False)

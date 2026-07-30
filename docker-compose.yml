@@ -17,6 +17,8 @@ services:
       - VOICEVOX_URL=http://voicevox:50021
       # 読み上げ声設定の DB ファイル置き場（下の named volume 上）
       - VOICE_DB_PATH=/app/data/voices.db
+      # 意気込みの DB ファイル置き場（同じ named volume 上）
+      - ASPIRATION_DB_PATH=/app/data/aspirations.db
 
     # 読み上げ声設定 DB を永続化する。リビルドしても設定が消えないようにする
     volumes:
