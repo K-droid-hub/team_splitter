@@ -6,7 +6,7 @@ from src.modules.tts import SPEAKER_CHOICES  # 読み上げ声設定の話者一
 
 MAX_NUMBER_BUTTONS = 5  # 数値ボタンの最大表示数
 MEMBER_BUTTON_LIMIT_SINGLE = 20  # 登録系(単一選択 + 操作ボタン)でボタン表示する上限
-MEMBER_BUTTON_LIMIT_MULTI = 15  # 抽選(数値行 + 複数選択 + 実行)でボタン表示する上限
+MEMBER_BUTTON_LIMIT_MULTI = 10  # 抽選(数値行 + 見出し + 複数選択 + 実行)でボタン表示する上限
 MEMBER_BUTTON_LIMIT_DELETE = 25  # 解除系(選択のみ)でボタン表示する上限
 
 
@@ -109,6 +109,17 @@ class PriorityMultiSelect(discord.ui.Select):
         await interaction.response.defer()
 
 
+# 人数ボタンと優先者ボタンの区切りに置く、押せない見出しボタン
+class PriorityLabelButton(discord.ui.Button):
+    def __init__(self, row):
+        super().__init__(
+            label="優先者(任意)",
+            style=discord.ButtonStyle.secondary,
+            row=row,
+            disabled=True,
+        )
+
+
 class RandomExecuteButton(discord.ui.Button):
     def __init__(self, row):
         super().__init__(label="実行", style=discord.ButtonStyle.danger, row=row)
@@ -129,13 +140,14 @@ class RandomView(discord.ui.View):
         self.selected_names = set()
         for value in size_values:
             self.add_item(SizeButton(value, row=0))
+        self.add_item(PriorityLabelButton(row=1))
         if len(member_names) <= MEMBER_BUTTON_LIMIT_MULTI:
             for i, name in enumerate(member_names):
-                self.add_item(PriorityToggleButton(name, row=1 + i // 5))
+                self.add_item(PriorityToggleButton(name, row=2 + i // 5))
             execute_row = 4
         else:
-            self.add_item(PriorityMultiSelect(member_names, row=1))
-            execute_row = 2
+            self.add_item(PriorityMultiSelect(member_names, row=2))
+            execute_row = 3
         self.add_item(RandomExecuteButton(row=execute_row))
 
 
