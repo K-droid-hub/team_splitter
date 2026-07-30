@@ -549,14 +549,15 @@ class PanelCog(commands.Cog):
 
     # 意気込みは VC 参加を問わずいつでも編集できるよう、押下で即モーダルを開く
     async def open_aspiration(self, interaction):
-        current = self.split_team.aspirations_by_name.get(interaction.user.display_name, "")
+        key = (interaction.guild_id, interaction.user.display_name)
+        current = self.split_team.aspirations_by_name.get(key, "")
         await interaction.response.send_modal(AspirationModal(self, current))
 
     # 意気込みを保存する。改行や余分な空白は 1 行に潰し、空なら削除扱いにする
     async def run_set_aspiration(self, interaction, text):
         text = " ".join(text.split())
         self.split_team.set_aspiration(
-            interaction.user.id, interaction.user.display_name, text
+            interaction.guild_id, interaction.user.id, interaction.user.display_name, text
         )
         message = "意気込みを設定しました。" if text else "意気込みを削除しました。"
         await interaction.response.send_message(message, ephemeral=True)

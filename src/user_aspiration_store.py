@@ -23,34 +23,37 @@ class UserAspirationStore:
         return sqlite3.connect(self.db_path, check_same_thread=False)
 
     def _create_table(self):
+        # 意気込みはサーバー(guild)ごとに独立させるため、(guild_id, user_id) を主キーにする
         self.connection.execute(
             "CREATE TABLE IF NOT EXISTS user_aspirations ("
-            "user_id INTEGER PRIMARY KEY, "
+            "guild_id INTEGER NOT NULL, "
+            "user_id INTEGER NOT NULL, "
             "aspiration TEXT, "
-            "display_name TEXT)"
+            "display_name TEXT, "
+            "PRIMARY KEY (guild_id, user_id))"
         )
         self.connection.commit()
 
-    # 意気込みを 1 件保存する。既存なら上書きする
-    def set_aspiration(self, user_id, aspiration, display_name=None):
+    # 意気込みを 1 件保存する。同じ guild_id・user_id なら上書きする
+    def set_aspiration(self, guild_id, user_id, aspiration, display_name=None):
         self.connection.execute(
-            "INSERT INTO user_aspirations (user_id, aspiration, display_name) "
-            "VALUES (?, ?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET "
+            "INSERT INTO user_aspirations (guild_id, user_id, aspiration, display_name) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
             "aspiration = excluded.aspiration, "
             "display_name = excluded.display_name",
-            (user_id, aspiration, display_name),
+            (guild_id, user_id, aspiration, display_name),
         )
         self.connection.commit()
 
-    # 保存済みの意気込みを display_name -> aspiration の dict で返す。
+    # 保存済みの意気込みを (guild_id, display_name) -> aspiration の dict で返す。
     # 表示は名前ベースなので、空の意気込み・名前欠落の行は除外する
     def load_aspirations_by_name(self):
         rows = self.connection.execute(
-            "SELECT display_name, aspiration FROM user_aspirations"
+            "SELECT guild_id, display_name, aspiration FROM user_aspirations"
         ).fetchall()
         return {
-            display_name: aspiration
-            for display_name, aspiration in rows
+            (guild_id, display_name): aspiration
+            for guild_id, display_name, aspiration in rows
             if display_name and aspiration
         }

@@ -36,13 +36,14 @@ class SplitTeam:
         self.aspiration_store = aspiration_store or UserAspirationStore()
         self.aspirations_by_name = self.aspiration_store.load_aspirations_by_name()
         
-    # VCメンバーのセット 
+    # VCメンバーのセット
     def set_member(self, interaction_or_ctx):
-        # VCに誰かいるか確認
+        # VCに誰かいるか確認。意気込みはサーバーごとに引き当てるので guild_id も控える
         if isinstance(interaction_or_ctx, discord.Interaction):
             state = interaction_or_ctx.user.voice
         else:
-            state = interaction_or_ctx.author.voice  
+            state = interaction_or_ctx.author.voice
+        guild_id = interaction_or_ctx.guild.id
         if state is None:
             return False
         # 現在のネームリストを取得 (bot は除く)
@@ -58,19 +59,19 @@ class SplitTeam:
         for name in current_vc_members:
             if name not in existing_names:
                 self.channel_members.append(player(name=name))
-        # DB 更新を反映するため、毎回全メンバーの意気込みを引き当て直す
+        # DB 更新を反映するため、毎回全メンバーの意気込みを引き当て直す(サーバー単位)
         for p in self.channel_members:
-            p.aspiration = self.aspirations_by_name.get(p.name, "")
+            p.aspiration = self.aspirations_by_name.get((guild_id, p.name), "")
         self.memberSize = len(self.channel_members)
         return True
 
     # 意気込みを DB へ保存し、名前ベースの辞書も更新する。空文字は削除扱い
-    def set_aspiration(self, user_id, display_name, aspiration):
-        self.aspiration_store.set_aspiration(user_id, aspiration, display_name)
+    def set_aspiration(self, guild_id, user_id, display_name, aspiration):
+        self.aspiration_store.set_aspiration(guild_id, user_id, aspiration, display_name)
         if aspiration:
-            self.aspirations_by_name[display_name] = aspiration
+            self.aspirations_by_name[(guild_id, display_name)] = aspiration
         else:
-            self.aspirations_by_name.pop(display_name, None)
+            self.aspirations_by_name.pop((guild_id, display_name), None)
 
     def makeTable(self, ctx, main_factor, main_factor_name):  
         #チャンネルメンバーリセット & チャンネルに誰もいなかった時の処理
