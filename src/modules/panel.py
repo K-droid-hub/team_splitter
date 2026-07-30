@@ -365,9 +365,10 @@ class PanelCog(commands.Cog):
         await channel.send(embed=embed)
         await self.repost_panel(channel)
 
-    # サブ View からの実行後、ephemeral を畳んで公開結果 + 貼り直し
+    # サブ View からの実行後、ephemeral を消して公開結果 + 貼り直し
     async def finish_sub(self, interaction, embed):
-        await interaction.response.edit_message(content="完了しました", embed=None, view=None)
+        await interaction.response.defer()
+        await interaction.delete_original_response()
         await self.post_result(interaction.channel, embed)
 
     # ---- 各ボタンの入口(押下時に候補を動的生成)----
