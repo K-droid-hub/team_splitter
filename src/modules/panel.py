@@ -658,8 +658,9 @@ class PanelCog(commands.Cog):
         embed.add_field(name="次だけ観戦者", value=viewers, inline=False)
         embed.add_field(name="固定優先者", value=rocked_priorities, inline=False)
         embed.add_field(name="次だけ優先者", value=priorities, inline=False)
-        await interaction.response.send_message(embed=embed)
-        await self.repost_panel(interaction.channel)
+        # パネル→出力結果 の順に揃えるため post_result を通す
+        await interaction.response.defer()
+        await self.post_result(interaction.channel, embed)
 
 
 async def setup(bot: commands.Bot):
