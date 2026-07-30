@@ -67,7 +67,8 @@ def make_manual_embed():
         name="読み上げ(TTS)",
         value=(
             "**読み上げ声設定**: *あなたの読み上げ音声を選びます*\n"
-            "**/読み上げ開始**: *ボイスチャンネルの読み上げを開始します*\n"
+            "**読み上げ開始 / 終了**: *パネルのボタンで読み上げを切り替えます*\n"
+            "**/読み上げ開始**: *入退室通知ありなど詳細指定で開始します*\n"
             "**/読み上げ終了**: *読み上げを終了します*"
         ),
         inline=False,
@@ -339,9 +340,16 @@ class VoiceSelectView(discord.ui.View):
 
 # ---- 常駐パネル(永続 View) ----
 class PanelView(discord.ui.View):
-    def __init__(self, cog):
+    def __init__(self, cog, is_reading=False):
         super().__init__(timeout=None)
         self.cog = cog
+        # 読み上げ状態に応じて 1 つのトグルボタンの見た目を切り替える
+        if is_reading:
+            self.tts_toggle.label = "読み上げ終了"
+            self.tts_toggle.style = discord.ButtonStyle.danger
+        else:
+            self.tts_toggle.label = "読み上げ開始"
+            self.tts_toggle.style = discord.ButtonStyle.success
 
     @discord.ui.button(label="チーム数で分ける", style=discord.ButtonStyle.primary,
                        custom_id="panel:by_team", row=0)
@@ -388,6 +396,12 @@ class PanelView(discord.ui.View):
     async def set_voice(self, interaction, button):
         await self.cog.open_voice(interaction)
 
+    # ラベル・色は __init__ で読み上げ状態に応じて上書きする
+    @discord.ui.button(label="読み上げ開始", style=discord.ButtonStyle.success,
+                       custom_id="panel:tts_toggle", row=4)
+    async def tts_toggle(self, interaction, button):
+        await self.cog.toggle_tts(interaction)
+
     @discord.ui.button(label="説明書", style=discord.ButtonStyle.secondary,
                        custom_id="panel:manual", row=4)
     async def manual(self, interaction, button):
@@ -419,7 +433,8 @@ class PanelCog(commands.Cog):
                 await old.delete()
             except discord.HTTPException:
                 pass
-        message = await channel.send(embed=make_panel_embed(), view=PanelView(self))
+        is_reading = self.bot.tts_manager.is_reading(channel.guild.id)
+        message = await channel.send(embed=make_panel_embed(), view=PanelView(self, is_reading))
         self.panel_messages[channel.id] = message
 
     async def post_result(self, channel, embed):
@@ -497,6 +512,42 @@ class PanelCog(commands.Cog):
     # 説明書は押した本人だけに見せ、チャンネルを汚さないよう ephemeral で出す
     async def open_manual(self, interaction):
         await interaction.response.send_message(embed=make_manual_embed(), ephemeral=True)
+
+    # 読み上げ状態に応じて開始・終了を切り替える
+    async def toggle_tts(self, interaction):
+        if self.bot.tts_manager.is_reading(interaction.guild_id):
+            await self.stop_tts(interaction)
+        else:
+            await self.start_tts(interaction)
+
+    async def start_tts(self, interaction):
+        if interaction.user.voice is None:
+            await interaction.response.send_message(
+                "ボイスチャンネルに入ってから押してください。", ephemeral=True
+            )
+            return
+        # VC 接続に時間がかかっても 3 秒制限で落ちないよう応答を保留する
+        await interaction.response.defer()
+        try:
+            voice_client = await interaction.user.voice.channel.connect()
+        except Exception as e:
+            # 接続失敗を握りつぶさず、原因の手掛かりとともに通知する
+            print(f"❌ VC 接続に失敗: {e}")
+            await interaction.followup.send(
+                "ボイスチャンネルへの接続に失敗しました。"
+                "PyNaCl・ffmpeg が導入されているか確認してください。",
+                ephemeral=True,
+            )
+            return
+        self.bot.tts_manager.start_reading(
+            interaction.guild_id, interaction.channel_id, voice_client, False
+        )
+        await self.repost_panel(interaction.channel)
+
+    async def stop_tts(self, interaction):
+        await interaction.response.defer()
+        await self.bot.tts_manager.stop_reading(interaction.guild_id)
+        await self.repost_panel(interaction.channel)
 
     # 読み上げ声は本人だけの設定なので、公開せず ephemeral で完結させる
     async def run_set_voice(self, interaction, speaker_value, speaker_name):
