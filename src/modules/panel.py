@@ -362,8 +362,8 @@ class PanelCog(commands.Cog):
         self.panel_messages[channel.id] = message
 
     async def post_result(self, channel, embed):
-        await channel.send(embed=embed)
         await self.repost_panel(channel)
+        await channel.send(embed=embed)
 
     # サブ View からの実行後、ephemeral を消して公開結果 + 貼り直し
     async def finish_sub(self, interaction, embed):
