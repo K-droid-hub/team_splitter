@@ -60,7 +60,7 @@ class NumberSelectView(discord.ui.View):
 # ---- 人数分抽選: 人数(単一) + 優先者(複数) + 実行 ----
 class SizeButton(discord.ui.Button):
     def __init__(self, value, row):
-        super().__init__(label=str(value), style=discord.ButtonStyle.primary, row=row)
+        super().__init__(label=str(value), style=discord.ButtonStyle.secondary, row=row)
         self.value = value
 
     async def callback(self, interaction):
@@ -71,7 +71,7 @@ class SizeButton(discord.ui.Button):
                 item.style = (
                     discord.ButtonStyle.success
                     if item.value == self.value
-                    else discord.ButtonStyle.primary
+                    else discord.ButtonStyle.secondary
                 )
         await interaction.response.edit_message(view=view)
 
