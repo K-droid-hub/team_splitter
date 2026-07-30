@@ -378,8 +378,10 @@ class PanelCog(commands.Cog):
     @app_commands.command(name="パネル")
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
     async def show_panel(self, interaction: discord.Interaction):
-        await interaction.response.send_message("操作パネルを設置しました", ephemeral=True)
+        # 設置メッセージは出さず、コマンドの応答だけ ephemeral で畳んで消す
+        await interaction.response.defer(ephemeral=True)
         await self.repost_panel(interaction.channel)
+        await interaction.delete_original_response()
 
     # 結果メッセージを公開で出し、パネルを最下部へ貼り直す
     async def repost_panel(self, channel):
