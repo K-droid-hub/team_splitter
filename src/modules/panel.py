@@ -6,7 +6,7 @@ from src.modules.tts import SPEAKER_CHOICES  # 読み上げ声設定の話者一
 
 MAX_NUMBER_BUTTONS = 5  # 数値ボタンの最大表示数
 MEMBER_BUTTON_LIMIT_SINGLE = 20  # 登録系(単一選択 + 操作ボタン)でボタン表示する上限
-MEMBER_BUTTON_LIMIT_MULTI = 10  # 抽選(数値行 + 見出し + 複数選択 + 実行)でボタン表示する上限
+MEMBER_BUTTON_LIMIT_MULTI = 15  # 抽選(数値行 + 複数選択 + 実行)でボタン表示する上限
 MEMBER_BUTTON_LIMIT_DELETE = 25  # 解除系(選択のみ)でボタン表示する上限
 
 
@@ -33,6 +33,52 @@ def make_panel_embed():
         title="チーム分けパネル",
         description="下のボタンから操作できます。ボイスチャンネルに入ってから押してください。",
         color=discord.Color.green(),
+    )
+    return embed
+
+
+def make_manual_embed():
+    line = "━" * 15
+    embed = discord.Embed(
+        title="📖 チーム分け Bot 説明書",
+        description=f"{line}\nボタン操作とコマンドの一覧\n{line}",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="チーム分け",
+        value=(
+            "**チーム数で分ける**: *指定したチーム数でメンバーを均等に分けます*\n"
+            "**人数で分ける**: *1 チームあたりの人数を指定して分けます*\n"
+            "**人数分抽選**: *指定した人数をランダムに抽選します(優先者を指定可)*"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="メンバー設定",
+        value=(
+            "**観戦者登録**: *選んだメンバーを観戦者(チーム分け対象外)にします*\n"
+            "**優先者登録**: *選んだメンバーを優先者にします*\n"
+            "**観戦者解除 / 優先者解除**: *登録を解除します*\n"
+            "**一覧表示**: *現在の登録状況を表示します*"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="読み上げ(TTS)",
+        value=(
+            "**読み上げ声設定**: *あなたの読み上げ音声を選びます*\n"
+            "**/読み上げ開始**: *ボイスチャンネルの読み上げを開始します*\n"
+            "**/読み上げ終了**: *読み上げを終了します*"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="コマンド",
+        value=(
+            "**/パネル**: *操作パネルを設置します*\n"
+            "**/リセット**: *観戦者・優先者の登録を全て解除します*"
+        ),
+        inline=False,
     )
     return embed
 
@@ -109,17 +155,6 @@ class PriorityMultiSelect(discord.ui.Select):
         await interaction.response.defer()
 
 
-# 人数ボタンと優先者ボタンの区切りに置く、押せない見出しボタン
-class PriorityLabelButton(discord.ui.Button):
-    def __init__(self, row):
-        super().__init__(
-            label="優先者(任意)",
-            style=discord.ButtonStyle.secondary,
-            row=row,
-            disabled=True,
-        )
-
-
 class RandomExecuteButton(discord.ui.Button):
     def __init__(self, row):
         super().__init__(label="実行", style=discord.ButtonStyle.danger, row=row)
@@ -140,14 +175,13 @@ class RandomView(discord.ui.View):
         self.selected_names = set()
         for value in size_values:
             self.add_item(SizeButton(value, row=0))
-        self.add_item(PriorityLabelButton(row=1))
         if len(member_names) <= MEMBER_BUTTON_LIMIT_MULTI:
             for i, name in enumerate(member_names):
-                self.add_item(PriorityToggleButton(name, row=2 + i // 5))
+                self.add_item(PriorityToggleButton(name, row=1 + i // 5))
             execute_row = 4
         else:
-            self.add_item(PriorityMultiSelect(member_names, row=2))
-            execute_row = 3
+            self.add_item(PriorityMultiSelect(member_names, row=1))
+            execute_row = 2
         self.add_item(RandomExecuteButton(row=execute_row))
 
 
@@ -326,6 +360,11 @@ class PanelView(discord.ui.View):
     async def set_voice(self, interaction, button):
         await self.cog.open_voice(interaction)
 
+    @discord.ui.button(label="説明書", style=discord.ButtonStyle.secondary,
+                       custom_id="panel:manual", row=4)
+    async def manual(self, interaction, button):
+        await self.cog.open_manual(interaction)
+
 
 class PanelCog(commands.Cog):
     def __init__(self, bot):
@@ -424,6 +463,10 @@ class PanelCog(commands.Cog):
         await interaction.response.send_message(
             "読み上げの声を選んでください", view=VoiceSelectView(self), ephemeral=True
         )
+
+    # 説明書は押した本人だけに見せ、チャンネルを汚さないよう ephemeral で出す
+    async def open_manual(self, interaction):
+        await interaction.response.send_message(embed=make_manual_embed(), ephemeral=True)
 
     # 読み上げ声は本人だけの設定なので、公開せず ephemeral で完結させる
     async def run_set_voice(self, interaction, speaker_value, speaker_name):
