@@ -3,7 +3,13 @@ import asyncio
 import pytest
 
 import src.pokemons as pokemons
-from src.pokemons import FALLBACK_POKEMONS, get_pokemons, pick_pokemons
+from src.pokemons import (
+    FALLBACK_POKEMONS,
+    POKEMON_NAMES_JA,
+    get_pokemons,
+    pick_pokemons,
+    to_japanese_name,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +35,23 @@ def test_pick_pokemons_caps_at_population_size():
     # 母数より多い指定は母数に丸める
     names = ["A", "B", "C"]
     assert len(pick_pokemons(names, 5)) == 3
+
+
+def test_to_japanese_name_translates_known_pokemon():
+    assert to_japanese_name("Pikachu") == "ピカチュウ"
+    # ユナイトの地域フォルムは実機名に合わせている
+    assert to_japanese_name("Ninetales") == "アローラキュウコン"
+
+
+def test_to_japanese_name_passes_through_unknown():
+    # 対応表に無い新ポケモンは英語名のまま返す
+    assert to_japanese_name("Brandnewmon") == "Brandnewmon"
+
+
+def test_japanese_map_covers_fallback_pool():
+    # フォールバックの全ポケモンに日本語名がある(取得失敗時も日本語表示できる)
+    missing = [name for name in FALLBACK_POKEMONS if name not in POKEMON_NAMES_JA]
+    assert missing == []
 
 
 def test_get_pokemons_falls_back_on_fetch_error(monkeypatch):

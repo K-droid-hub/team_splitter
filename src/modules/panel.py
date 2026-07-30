@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.modules.tts import SPEAKER_CHOICES  # 読み上げ声設定の話者一覧を共有
-from src.pokemons import get_pokemons, pick_pokemons
+from src.pokemons import get_pokemons, pick_pokemons, to_japanese_name
 
 MAX_NUMBER_BUTTONS = 5  # 数値ボタンの最大表示数
 MAX_PICK_COUNT = 5  # ランダムピックで一度に選べる最大数(1 チーム分)
@@ -631,7 +631,9 @@ class PanelCog(commands.Cog):
         await interaction.response.defer()
         names = await get_pokemons()
         picks = pick_pokemons(names, count)
-        body = "\n".join(f"{i}. {name}" for i, name in enumerate(picks, start=1))
+        body = "\n".join(
+            f"{i}. {to_japanese_name(name)}" for i, name in enumerate(picks, start=1)
+        )
         await interaction.delete_original_response()
         await self.post_result(interaction.channel, make_split_embed("ランダムピック", body))
 
