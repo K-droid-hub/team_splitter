@@ -3,8 +3,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.modules.tts import SPEAKER_CHOICES  # 読み上げ声設定の話者一覧を共有
+from src.pokemons import get_pokemons, pick_pokemons
 
 MAX_NUMBER_BUTTONS = 5  # 数値ボタンの最大表示数
+MAX_PICK_COUNT = 5  # ランダムピックで一度に選べる最大数(1 チーム分)
 MEMBER_BUTTON_LIMIT_SINGLE = 20  # 登録系(単一選択 + 操作ボタン)でボタン表示する上限
 MEMBER_BUTTON_LIMIT_MULTI = 15  # 抽選(数値行 + 複数選択 + 実行)でボタン表示する上限
 MEMBER_BUTTON_LIMIT_DELETE = 20  # 解除系(複数選択 + 実行)でボタン表示する上限
@@ -14,6 +16,11 @@ def build_number_values(mode, member_size):
     # チーム数は 2 以上、人数は 1 以上。VC 人数を上限に、ボタンは最大 5 個まで
     start = 2 if mode == "team" else 1
     return list(range(start, member_size + 1))[:MAX_NUMBER_BUTTONS]
+
+
+def build_pick_counts():
+    # ランダムピックの抽選数候補。VC 人数に依存しない固定値
+    return list(range(1, MAX_PICK_COUNT + 1))
 
 
 def make_split_embed(title, result):
@@ -49,7 +56,8 @@ def make_manual_embed():
         value=(
             "**チーム数で分ける**: *指定したチーム数でメンバーを均等に分けます*\n"
             "**人数で分ける**: *1 チームあたりの人数を指定して分けます*\n"
-            "**人数分抽選**: *指定した人数をランダムに抽選します(優先者を指定可)*"
+            "**人数分抽選**: *指定した人数をランダムに抽選します(優先者を指定可)*\n"
+            "**ランダムピック**: *参戦ポケモンから指定数をランダムに選びます*"
         ),
         inline=False,
     )
@@ -102,6 +110,24 @@ class NumberSelectView(discord.ui.View):
         self.mode = mode  # "team" or "size"
         for value in values:
             self.add_item(NumberButton(value, row=0))
+
+
+# ---- ランダムピック: 抽選数を押下即実行 ----
+class PickCountButton(discord.ui.Button):
+    def __init__(self, value, row):
+        super().__init__(label=str(value), style=discord.ButtonStyle.primary, row=row)
+        self.value = value
+
+    async def callback(self, interaction):
+        await self.view.cog.run_random_pick(interaction, self.value)
+
+
+class RandomPickView(discord.ui.View):
+    def __init__(self, cog, counts):
+        super().__init__(timeout=120)
+        self.cog = cog
+        for value in counts:
+            self.add_item(PickCountButton(value, row=0))
 
 
 # ---- 人数分抽選: 人数(単一) + 優先者(複数) + 実行 ----
@@ -366,6 +392,11 @@ class PanelView(discord.ui.View):
     async def by_random(self, interaction, button):
         await self.cog.open_random(interaction)
 
+    @discord.ui.button(label="ランダムピック", style=discord.ButtonStyle.primary,
+                       custom_id="panel:random_pick", row=0)
+    async def random_pick(self, interaction, button):
+        await self.cog.open_random_pick(interaction)
+
     @discord.ui.button(label="観戦者登録", style=discord.ButtonStyle.secondary,
                        custom_id="panel:add_viewer", row=1)
     async def add_viewer(self, interaction, button):
@@ -487,6 +518,13 @@ class PanelCog(commands.Cog):
             "人数を選び、必要なら優先者を選んで実行してください", view=view, ephemeral=True
         )
 
+    # ランダムピックは VC メンバーに依存しないので VC チェックは不要
+    async def open_random_pick(self, interaction):
+        view = RandomPickView(self, build_pick_counts())
+        await interaction.response.send_message(
+            "抽選する数を選んでください", view=view, ephemeral=True
+        )
+
     async def open_register(self, interaction, is_viewer):
         if not self.split_team.set_member(interaction):
             await interaction.response.send_message(self.split_team.vc_err, ephemeral=True)
@@ -587,6 +625,15 @@ class PanelCog(commands.Cog):
             )
         result = self.split_team.split(interaction, teamCount=1, teamSize=size)
         await self.finish_sub(interaction, make_split_embed("人数分抽選", result))
+
+    async def run_random_pick(self, interaction, count):
+        # 初回はコールドキャッシュで 3MB DL が入り得るので、取得前に defer して 3 秒制限を回避する
+        await interaction.response.defer()
+        names = await get_pokemons()
+        picks = pick_pokemons(names, count)
+        body = "\n".join(f"{i}. {name}" for i, name in enumerate(picks, start=1))
+        await interaction.delete_original_response()
+        await self.post_result(interaction.channel, make_split_embed("ランダムピック", body))
 
     async def run_register(self, interaction, is_viewer, name, lock):
         result = self.split_team.add_special(
