@@ -7,7 +7,7 @@ from src.modules.tts import SPEAKER_CHOICES  # 読み上げ声設定の話者一
 MAX_NUMBER_BUTTONS = 5  # 数値ボタンの最大表示数
 MEMBER_BUTTON_LIMIT_SINGLE = 20  # 登録系(単一選択 + 操作ボタン)でボタン表示する上限
 MEMBER_BUTTON_LIMIT_MULTI = 15  # 抽選(数値行 + 複数選択 + 実行)でボタン表示する上限
-MEMBER_BUTTON_LIMIT_DELETE = 25  # 解除系(選択のみ)でボタン表示する上限
+MEMBER_BUTTON_LIMIT_DELETE = 20  # 解除系(複数選択 + 実行)でボタン表示する上限
 
 
 def build_number_values(mode, member_size):
@@ -37,6 +37,53 @@ def make_panel_embed():
     return embed
 
 
+def make_manual_embed():
+    line = "━" * 15
+    embed = discord.Embed(
+        title="📖 チーム分け Bot 説明書",
+        description=f"{line}\nボタン操作とコマンドの一覧\n{line}",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="チーム分け",
+        value=(
+            "**チーム数で分ける**: *指定したチーム数でメンバーを均等に分けます*\n"
+            "**人数で分ける**: *1 チームあたりの人数を指定して分けます*\n"
+            "**人数分抽選**: *指定した人数をランダムに抽選します(優先者を指定可)*"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="メンバー設定",
+        value=(
+            "**観戦者登録**: *選んだメンバーを観戦者(チーム分け対象外)にします*\n"
+            "**優先者登録**: *選んだメンバーを優先者にします*\n"
+            "**観戦者解除 / 優先者解除**: *登録を解除します*\n"
+            "**一覧表示**: *現在の登録状況を表示します*"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="読み上げ(TTS)",
+        value=(
+            "**読み上げ声設定**: *あなたの読み上げ音声を選びます*\n"
+            "**読み上げ開始 / 終了**: *パネルのボタンで読み上げを切り替えます*\n"
+            "**/読み上げ開始**: *入退室通知ありなど詳細指定で開始します*\n"
+            "**/読み上げ終了**: *読み上げを終了します*"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="コマンド",
+        value=(
+            "**/パネル**: *操作パネルを設置します*\n"
+            "**/リセット**: *観戦者・優先者の登録を全て解除します*"
+        ),
+        inline=False,
+    )
+    return embed
+
+
 # ---- 数値選択(チーム数 / 人数): 押下即実行 ----
 class NumberButton(discord.ui.Button):
     def __init__(self, value, row):
@@ -60,7 +107,7 @@ class NumberSelectView(discord.ui.View):
 # ---- 人数分抽選: 人数(単一) + 優先者(複数) + 実行 ----
 class SizeButton(discord.ui.Button):
     def __init__(self, value, row):
-        super().__init__(label=str(value), style=discord.ButtonStyle.primary, row=row)
+        super().__init__(label=str(value), style=discord.ButtonStyle.secondary, row=row)
         self.value = value
 
     async def callback(self, interaction):
@@ -71,7 +118,7 @@ class SizeButton(discord.ui.Button):
                 item.style = (
                     discord.ButtonStyle.success
                     if item.value == self.value
-                    else discord.ButtonStyle.primary
+                    else discord.ButtonStyle.secondary
                 )
         await interaction.response.edit_message(view=view)
 
@@ -111,7 +158,7 @@ class PriorityMultiSelect(discord.ui.Select):
 
 class RandomExecuteButton(discord.ui.Button):
     def __init__(self, row):
-        super().__init__(label="実行", style=discord.ButtonStyle.danger, row=row)
+        super().__init__(label="実行", style=discord.ButtonStyle.primary, row=row)
 
     async def callback(self, interaction):
         view = self.view
@@ -184,7 +231,7 @@ class LockToggleButton(discord.ui.Button):
 
 class RegisterExecuteButton(discord.ui.Button):
     def __init__(self, row):
-        super().__init__(label="実行", style=discord.ButtonStyle.danger, row=row)
+        super().__init__(label="実行", style=discord.ButtonStyle.primary, row=row)
 
     async def callback(self, interaction):
         view = self.view
@@ -210,26 +257,50 @@ class RegisterView(discord.ui.View):
         self.add_item(RegisterExecuteButton(row=4))
 
 
-# ---- 観戦者 / 優先者 解除: 対象を押下即実行 ----
-class DeleteMemberButton(discord.ui.Button):
+# ---- 観戦者 / 優先者 解除: 対象(複数) + 実行 ----
+class DeleteToggleButton(discord.ui.Button):
     def __init__(self, name, row):
-        super().__init__(label=name, style=discord.ButtonStyle.primary, row=row)
+        super().__init__(label=name, style=discord.ButtonStyle.secondary, row=row)
         self.name = name
 
     async def callback(self, interaction):
         view = self.view
-        await view.cog.run_delete(interaction, view.is_viewer, self.name)
+        if self.name in view.selected_names:
+            view.selected_names.discard(self.name)
+            self.style = discord.ButtonStyle.secondary
+        else:
+            view.selected_names.add(self.name)
+            self.style = discord.ButtonStyle.success
+        await interaction.response.edit_message(view=view)
 
 
-class DeleteMemberSelect(discord.ui.Select):
+class DeleteMultiSelect(discord.ui.Select):
+    # メンバーが多くボタンで収まらない場合のフォールバック
     def __init__(self, names, row):
         options = [discord.SelectOption(label=name) for name in names[:25]]
         super().__init__(
-            placeholder="解除する対象を選択", min_values=1, max_values=1, options=options, row=row
+            placeholder="解除する対象を選択(複数可)",
+            min_values=0,
+            max_values=len(options),
+            options=options,
+            row=row,
         )
 
     async def callback(self, interaction):
-        await self.view.cog.run_delete(interaction, self.view.is_viewer, self.values[0])
+        self.view.selected_names = set(self.values)
+        await interaction.response.defer()
+
+
+class DeleteExecuteButton(discord.ui.Button):
+    def __init__(self, row):
+        super().__init__(label="実行", style=discord.ButtonStyle.primary, row=row)
+
+    async def callback(self, interaction):
+        view = self.view
+        if not view.selected_names:
+            await interaction.response.send_message("対象を選んでください", ephemeral=True)
+            return
+        await view.cog.run_delete(interaction, view.is_viewer, list(view.selected_names))
 
 
 class DeleteView(discord.ui.View):
@@ -237,26 +308,15 @@ class DeleteView(discord.ui.View):
         super().__init__(timeout=120)
         self.cog = cog
         self.is_viewer = is_viewer
+        self.selected_names = set()
         if len(member_names) <= MEMBER_BUTTON_LIMIT_DELETE:
             for i, name in enumerate(member_names):
-                self.add_item(DeleteMemberButton(name, row=i // 5))
+                self.add_item(DeleteToggleButton(name, row=i // 5))
+            execute_row = 4
         else:
-            self.add_item(DeleteMemberSelect(member_names, row=0))
-
-
-# ---- リセット確認 ----
-class ConfirmResetView(discord.ui.View):
-    def __init__(self, cog):
-        super().__init__(timeout=120)
-        self.cog = cog
-
-    @discord.ui.button(label="リセットする", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction, button):
-        await self.cog.run_reset(interaction)
-
-    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction, button):
-        await interaction.response.edit_message(content="キャンセルしました", view=None)
+            self.add_item(DeleteMultiSelect(member_names, row=0))
+            execute_row = 1
+        self.add_item(DeleteExecuteButton(row=execute_row))
 
 
 # ---- 読み上げ声設定: 話者を押下即設定(本人のみ) ----
@@ -280,9 +340,16 @@ class VoiceSelectView(discord.ui.View):
 
 # ---- 常駐パネル(永続 View) ----
 class PanelView(discord.ui.View):
-    def __init__(self, cog):
+    def __init__(self, cog, is_reading=False):
         super().__init__(timeout=None)
         self.cog = cog
+        # 読み上げ状態に応じて 1 つのトグルボタンの見た目を切り替える
+        if is_reading:
+            self.tts_toggle.label = "読み上げ終了"
+            self.tts_toggle.style = discord.ButtonStyle.danger
+        else:
+            self.tts_toggle.label = "読み上げ開始"
+            self.tts_toggle.style = discord.ButtonStyle.success
 
     @discord.ui.button(label="チーム数で分ける", style=discord.ButtonStyle.primary,
                        custom_id="panel:by_team", row=0)
@@ -324,15 +391,21 @@ class PanelView(discord.ui.View):
     async def show_all(self, interaction, button):
         await self.cog.run_show_all(interaction)
 
-    @discord.ui.button(label="リセット", style=discord.ButtonStyle.danger,
-                       custom_id="panel:reset", row=3)
-    async def reset(self, interaction, button):
-        await self.cog.open_reset(interaction)
-
     @discord.ui.button(label="読み上げ声設定", style=discord.ButtonStyle.secondary,
                        custom_id="panel:set_voice", row=4)
     async def set_voice(self, interaction, button):
         await self.cog.open_voice(interaction)
+
+    # ラベル・色は __init__ で読み上げ状態に応じて上書きする
+    @discord.ui.button(label="読み上げ開始", style=discord.ButtonStyle.success,
+                       custom_id="panel:tts_toggle", row=4)
+    async def tts_toggle(self, interaction, button):
+        await self.cog.toggle_tts(interaction)
+
+    @discord.ui.button(label="説明書", style=discord.ButtonStyle.secondary,
+                       custom_id="panel:manual", row=4)
+    async def manual(self, interaction, button):
+        await self.cog.open_manual(interaction)
 
 
 class PanelCog(commands.Cog):
@@ -347,8 +420,10 @@ class PanelCog(commands.Cog):
     @app_commands.command(name="パネル")
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
     async def show_panel(self, interaction: discord.Interaction):
-        await interaction.response.send_message("操作パネルを設置しました", ephemeral=True)
+        # 設置メッセージは出さず、コマンドの応答だけ ephemeral で畳んで消す
+        await interaction.response.defer(ephemeral=True)
         await self.repost_panel(interaction.channel)
+        await interaction.delete_original_response()
 
     # 結果メッセージを公開で出し、パネルを最下部へ貼り直す
     async def repost_panel(self, channel):
@@ -358,16 +433,30 @@ class PanelCog(commands.Cog):
                 await old.delete()
             except discord.HTTPException:
                 pass
-        message = await channel.send(embed=make_panel_embed(), view=PanelView(self))
+        is_reading = self.bot.tts_manager.is_reading(channel.guild.id)
+        message = await channel.send(embed=make_panel_embed(), view=PanelView(self, is_reading))
         self.panel_messages[channel.id] = message
 
-    async def post_result(self, channel, embed):
-        await channel.send(embed=embed)
-        await self.repost_panel(channel)
+    # 読み上げの自動終了など、パネル外の状態変化を既存パネルのボタンへ反映する。
+    # 貼り直すと位置が動いて煩わしいので、その場でビューだけ差し替える
+    async def refresh_panels(self, guild):
+        is_reading = self.bot.tts_manager.is_reading(guild.id)
+        for channel_id, message in list(self.panel_messages.items()):
+            if message.guild is None or message.guild.id != guild.id:
+                continue
+            try:
+                await message.edit(view=PanelView(self, is_reading))
+            except discord.HTTPException:
+                pass
 
-    # サブ View からの実行後、ephemeral を畳んで公開結果 + 貼り直し
+    async def post_result(self, channel, embed):
+        await self.repost_panel(channel)
+        await channel.send(embed=embed)
+
+    # サブ View からの実行後、ephemeral を消して公開結果 + 貼り直し
     async def finish_sub(self, interaction, embed):
-        await interaction.response.edit_message(content="完了しました", embed=None, view=None)
+        await interaction.response.defer()
+        await interaction.delete_original_response()
         await self.post_result(interaction.channel, embed)
 
     # ---- 各ボタンの入口(押下時に候補を動的生成)----
@@ -424,20 +513,53 @@ class PanelCog(commands.Cog):
         view = DeleteView(self, is_viewer, member_names)
         label = "観戦者" if is_viewer else "優先者"
         await interaction.response.send_message(
-            f"解除する{label}を選んでください", view=view, ephemeral=True
-        )
-
-    async def open_reset(self, interaction):
-        await interaction.response.send_message(
-            "観戦者・優先者を全て解除します。よろしいですか？",
-            view=ConfirmResetView(self),
-            ephemeral=True,
+            f"解除する{label}を選んで実行してください(複数可)", view=view, ephemeral=True
         )
 
     async def open_voice(self, interaction):
         await interaction.response.send_message(
             "読み上げの声を選んでください", view=VoiceSelectView(self), ephemeral=True
         )
+
+    # 説明書は押した本人だけに見せ、チャンネルを汚さないよう ephemeral で出す
+    async def open_manual(self, interaction):
+        await interaction.response.send_message(embed=make_manual_embed(), ephemeral=True)
+
+    # 読み上げ状態に応じて開始・終了を切り替える
+    async def toggle_tts(self, interaction):
+        if self.bot.tts_manager.is_reading(interaction.guild_id):
+            await self.stop_tts(interaction)
+        else:
+            await self.start_tts(interaction)
+
+    async def start_tts(self, interaction):
+        if interaction.user.voice is None:
+            await interaction.response.send_message(
+                "ボイスチャンネルに入ってから押してください。", ephemeral=True
+            )
+            return
+        # VC 接続に時間がかかっても 3 秒制限で落ちないよう応答を保留する
+        await interaction.response.defer()
+        try:
+            voice_client = await interaction.user.voice.channel.connect()
+        except Exception as e:
+            # 接続失敗を握りつぶさず、原因の手掛かりとともに通知する
+            print(f"❌ VC 接続に失敗: {e}")
+            await interaction.followup.send(
+                "ボイスチャンネルへの接続に失敗しました。"
+                "PyNaCl・ffmpeg が導入されているか確認してください。",
+                ephemeral=True,
+            )
+            return
+        self.bot.tts_manager.start_reading(
+            interaction.guild_id, interaction.channel_id, voice_client, False
+        )
+        await self.repost_panel(interaction.channel)
+
+    async def stop_tts(self, interaction):
+        await interaction.response.defer()
+        await self.bot.tts_manager.stop_reading(interaction.guild_id)
+        await self.repost_panel(interaction.channel)
 
     # 読み上げ声は本人だけの設定なので、公開せず ephemeral で完結させる
     async def run_set_voice(self, interaction, speaker_value, speaker_name):
@@ -473,10 +595,13 @@ class PanelCog(commands.Cog):
         title = "観戦者登録" if is_viewer else "優先者登録"
         await self.finish_sub(interaction, make_special_embed(title, result))
 
-    async def run_delete(self, interaction, is_viewer, name):
-        result = self.split_team.delete_special(name, isViewer=is_viewer, isPriority=not is_viewer)
+    async def run_delete(self, interaction, is_viewer, names):
+        results = [
+            self.split_team.delete_special(name, isViewer=is_viewer, isPriority=not is_viewer)
+            for name in names
+        ]
         title = "観戦者解除" if is_viewer else "優先者解除"
-        await self.finish_sub(interaction, make_special_embed(title, result))
+        await self.finish_sub(interaction, make_special_embed(title, "\n".join(results)))
 
     async def run_show_all(self, interaction):
         self.split_team.set_member(interaction)
@@ -494,12 +619,6 @@ class PanelCog(commands.Cog):
         embed.add_field(name="次だけ優先者", value=priorities, inline=False)
         await interaction.response.send_message(embed=embed)
         await self.repost_panel(interaction.channel)
-
-    async def run_reset(self, interaction):
-        self.split_team.reset_all()
-        embed = discord.Embed(color=discord.Color.dark_grey())
-        embed.add_field(name="リセット", value="ALL RESET DONE", inline=False)
-        await self.finish_sub(interaction, embed)
 
 
 async def setup(bot: commands.Bot):
