@@ -244,21 +244,6 @@ class DeleteView(discord.ui.View):
             self.add_item(DeleteMemberSelect(member_names, row=0))
 
 
-# ---- リセット確認 ----
-class ConfirmResetView(discord.ui.View):
-    def __init__(self, cog):
-        super().__init__(timeout=120)
-        self.cog = cog
-
-    @discord.ui.button(label="リセットする", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction, button):
-        await self.cog.run_reset(interaction)
-
-    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction, button):
-        await interaction.response.edit_message(content="キャンセルしました", view=None)
-
-
 # ---- 読み上げ声設定: 話者を押下即設定(本人のみ) ----
 class VoiceButton(discord.ui.Button):
     def __init__(self, speaker_name, speaker_value):
@@ -323,11 +308,6 @@ class PanelView(discord.ui.View):
                        custom_id="panel:show_all", row=3)
     async def show_all(self, interaction, button):
         await self.cog.run_show_all(interaction)
-
-    @discord.ui.button(label="リセット", style=discord.ButtonStyle.danger,
-                       custom_id="panel:reset", row=3)
-    async def reset(self, interaction, button):
-        await self.cog.open_reset(interaction)
 
     @discord.ui.button(label="読み上げ声設定", style=discord.ButtonStyle.secondary,
                        custom_id="panel:set_voice", row=4)
@@ -428,13 +408,6 @@ class PanelCog(commands.Cog):
             f"解除する{label}を選んでください", view=view, ephemeral=True
         )
 
-    async def open_reset(self, interaction):
-        await interaction.response.send_message(
-            "観戦者・優先者を全て解除します。よろしいですか？",
-            view=ConfirmResetView(self),
-            ephemeral=True,
-        )
-
     async def open_voice(self, interaction):
         await interaction.response.send_message(
             "読み上げの声を選んでください", view=VoiceSelectView(self), ephemeral=True
@@ -495,12 +468,6 @@ class PanelCog(commands.Cog):
         embed.add_field(name="次だけ優先者", value=priorities, inline=False)
         await interaction.response.send_message(embed=embed)
         await self.repost_panel(interaction.channel)
-
-    async def run_reset(self, interaction):
-        self.split_team.reset_all()
-        embed = discord.Embed(color=discord.Color.dark_grey())
-        embed.add_field(name="リセット", value="ALL RESET DONE", inline=False)
-        await self.finish_sub(interaction, embed)
 
 
 async def setup(bot: commands.Bot):
