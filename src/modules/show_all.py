@@ -2,6 +2,8 @@ import discord, os
 from discord.ext import commands
 from discord import app_commands
 
+from src.grouping import format_member_list  # 意気込み付きの一覧整形を共有
+
 class ShowAll(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -15,12 +17,13 @@ class ShowAll(commands.Cog):
 
     async def show_command(self, interaction: discord.Interaction):
         self.split_team.set_member(interaction)
-        # 各状態のリストを取得
-        rockedViewers = ", ".join([member.name for member in self.split_team.channel_members if member.viewer and member.rockedFlag]) if self.split_team.channel_members else "なし"
-        viewers = ", ".join([member.name for member in self.split_team.channel_members if member.viewer and not member.rockedFlag]) if self.split_team.channel_members else "なし"
-        rockedPriorities = ", ".join([member.name for member in self.split_team.channel_members if member.priority and member.rockedFlag]) if self.split_team.channel_members else "なし"
-        priorities = ", ".join([member.name for member in self.split_team.channel_members if member.priority and not member.rockedFlag]) if self.split_team.channel_members else "なし"
-        channel_members = ", ".join([member.name for member in self.split_team.channel_members if not member.viewer and not member.priority]) if self.split_team.channel_members else "なし"
+        members = self.split_team.channel_members
+        # 各状態のリストを取得(意気込みがある人は名前の下に斜体で添える)
+        rockedViewers = format_member_list([m for m in members if m.viewer and m.rockedFlag])
+        viewers = format_member_list([m for m in members if m.viewer and not m.rockedFlag])
+        rockedPriorities = format_member_list([m for m in members if m.priority and m.rockedFlag])
+        priorities = format_member_list([m for m in members if m.priority and not m.rockedFlag])
+        channel_members = format_member_list([m for m in members if not m.viewer and not m.priority])
         embed = discord.Embed(title="一覧表示", color=discord.Color.red())
         embed.add_field(name="チャンネルメンバー", value=channel_members, inline=False)
         embed.add_field(name="固定観戦者", value=rockedViewers, inline=False)

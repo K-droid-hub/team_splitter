@@ -3,18 +3,38 @@ import discord
 import math
 import dataclasses
 
+from src.user_aspiration_store import UserAspirationStore
+
 @dataclasses.dataclass
 class player:
     name: str
     priority: bool = False
     viewer: bool = False
     rockedFlag: bool = False
+    aspiration: str = ""
+
+
+# 意気込みがある人だけ 2 行目に斜体で添える。無い人は行を詰めて名前のみ返す
+def format_member_entry(name, aspiration):
+    if aspiration:
+        return f"{name}\n*{aspiration}*"
+    return name
+
+
+# player のリストを、意気込み付きの改行連結テキストにする。空なら "なし"
+def format_member_list(members):
+    if not members:
+        return "なし"
+    return "\n".join(format_member_entry(m.name, m.aspiration) for m in members)
 
 class SplitTeam:
-    def __init__(self):
+    def __init__(self, aspiration_store=None):
         self.channel_members = [] # player クラスのインスタンスのリスト
         self.memberSize = 0
-        self.vc_err = '実行できません。ボイスチャンネルに入ってコマンドを実行してください。' 
+        self.vc_err = '実行できません。ボイスチャンネルに入ってコマンドを実行してください。'
+        # 意気込みは DB に永続化し、名前ベースで引き当てられるよう辞書で保持する
+        self.aspiration_store = aspiration_store or UserAspirationStore()
+        self.aspirations_by_name = self.aspiration_store.load_aspirations_by_name()
         
     # VCメンバーのセット 
     def set_member(self, interaction_or_ctx):
@@ -38,8 +58,19 @@ class SplitTeam:
         for name in current_vc_members:
             if name not in existing_names:
                 self.channel_members.append(player(name=name))
+        # DB 更新を反映するため、毎回全メンバーの意気込みを引き当て直す
+        for p in self.channel_members:
+            p.aspiration = self.aspirations_by_name.get(p.name, "")
         self.memberSize = len(self.channel_members)
         return True
+
+    # 意気込みを DB へ保存し、名前ベースの辞書も更新する。空文字は削除扱い
+    def set_aspiration(self, user_id, display_name, aspiration):
+        self.aspiration_store.set_aspiration(user_id, aspiration, display_name)
+        if aspiration:
+            self.aspirations_by_name[display_name] = aspiration
+        else:
+            self.aspirations_by_name.pop(display_name, None)
 
     def makeTable(self, ctx, main_factor, main_factor_name):  
         #チャンネルメンバーリセット & チャンネルに誰もいなかった時の処理
@@ -74,19 +105,22 @@ class SplitTeam:
             teams = [[] for _ in range(teamCount)]
             # 1人ずつ順番にチームに配属していく
             for i, p in enumerate(table):
-                teams[i % teamCount].append(p.name)
+                teams[i % teamCount].append(p)
             results = []
             # 出力をまとめる
             for i, members in enumerate(teams):
                 results.append(f"=====チーム{i + 1}=====")
-                results.extend(members)
+                results.extend(format_member_entry(p.name, p.aspiration) for p in members)
         elif main_factor_name == "1チームあたりの人数":
             # チーム数を計算して、チーム数分の空のリストを用意
             teamCount = math.ceil(len(table) / teamSize)
             results = []
             for i in range(teamCount):
                 results.append(f"=====チーム{i + 1}=====")
-                results.extend([player.name for player in table[i * teamSize : (i + 1) * teamSize]])
+                results.extend(
+                    format_member_entry(p.name, p.aspiration)
+                    for p in table[i * teamSize : (i + 1) * teamSize]
+                )
         else:
             results = ["=====抽選結果====="]
             # 優先者を引っこ抜き、先に追加する
@@ -95,11 +129,13 @@ class SplitTeam:
                 table.remove(p)
             while priorities and teamSize > 0:
                 random.shuffle(priorities)
-                results.append(priorities.pop().name)
+                p = priorities.pop()
+                results.append(format_member_entry(p.name, p.aspiration))
                 teamSize -= 1
             if teamSize > 0:
                 for _ in range(teamSize):
-                    results.append(table.pop().name) 
+                    p = table.pop()
+                    results.append(format_member_entry(p.name, p.aspiration))
         # チーム分けが終わった後、固定されていない優先者と観戦者をリセット     
         for player in self.channel_members:
             if not player.rockedFlag:
