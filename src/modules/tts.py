@@ -129,6 +129,10 @@ class Tts(commands.Cog):
         remaining = [m for m in bot_channel.members if not m.bot]
         if not remaining:
             await self.tts_manager.stop_reading(guild_id)
+            # パネルのボタン表示を 読み上げ開始 に戻す
+            panel_cog = self.bot.get_cog("PanelCog")
+            if panel_cog is not None:
+                await panel_cog.refresh_panels(member.guild)
 
 
 # Cog 登録

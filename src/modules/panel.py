@@ -437,6 +437,18 @@ class PanelCog(commands.Cog):
         message = await channel.send(embed=make_panel_embed(), view=PanelView(self, is_reading))
         self.panel_messages[channel.id] = message
 
+    # 読み上げの自動終了など、パネル外の状態変化を既存パネルのボタンへ反映する。
+    # 貼り直すと位置が動いて煩わしいので、その場でビューだけ差し替える
+    async def refresh_panels(self, guild):
+        is_reading = self.bot.tts_manager.is_reading(guild.id)
+        for channel_id, message in list(self.panel_messages.items()):
+            if message.guild is None or message.guild.id != guild.id:
+                continue
+            try:
+                await message.edit(view=PanelView(self, is_reading))
+            except discord.HTTPException:
+                pass
+
     async def post_result(self, channel, embed):
         await self.repost_panel(channel)
         await channel.send(embed=embed)
