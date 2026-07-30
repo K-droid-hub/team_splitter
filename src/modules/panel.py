@@ -157,7 +157,7 @@ class PriorityMultiSelect(discord.ui.Select):
 
 class RandomExecuteButton(discord.ui.Button):
     def __init__(self, row):
-        super().__init__(label="実行", style=discord.ButtonStyle.danger, row=row)
+        super().__init__(label="実行", style=discord.ButtonStyle.primary, row=row)
 
     async def callback(self, interaction):
         view = self.view
