@@ -50,7 +50,7 @@ def make_cog():
     return PanelCog(bot)
 
 
-def test_voice_select_view_pairs_speaker_with_preview_per_row():
+def test_voice_select_view_pairs_speaker_with_preview():
     async def scenario():
         view = VoiceSelectView(make_cog())
         speakers = view.children[0::2]
@@ -59,12 +59,26 @@ def test_voice_select_view_pairs_speaker_with_preview_per_row():
         assert len(view.children) == len(SPEAKER_CHOICES) * 2
         assert all(isinstance(b, VoiceButton) for b in speakers)
         assert all(isinstance(b, VoicePreviewButton) for b in previews)
-        for row, choice in enumerate(SPEAKER_CHOICES):
-            # 話者と試聴が同じ行に並び、同じ話者を指すこと
-            assert speakers[row].label == choice.name
-            assert speakers[row].row == row
-            assert previews[row].row == row
-            assert previews[row].speaker_value == choice.value
+        for index, choice in enumerate(SPEAKER_CHOICES):
+            # 話者と試聴が同じ行に隣接し、同じ話者を指すこと
+            assert speakers[index].label == choice.name
+            assert speakers[index].speaker_value == choice.value
+            assert speakers[index].row == previews[index].row
+            # 1 行に 2 話者ずつ並べること
+            assert speakers[index].row == index // 2
+
+    asyncio.run(scenario())
+
+
+def test_voice_select_view_fits_discord_row_limit():
+    async def scenario():
+        view = VoiceSelectView(make_cog())
+        # Discord の制限(5 行・1 行 5 ボタン)を超えないこと
+        assert max(button.row for button in view.children) <= 4
+        buttons_per_row = {}
+        for button in view.children:
+            buttons_per_row[button.row] = buttons_per_row.get(button.row, 0) + 1
+        assert all(count <= 5 for count in buttons_per_row.values())
 
     asyncio.run(scenario())
 
