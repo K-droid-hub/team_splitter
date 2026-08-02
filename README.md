@@ -34,16 +34,19 @@
 
 ## 一般権限
 - チャンネルを表示
-- メンバーを管理
 
 ## テキストの権限
 - メッセージを送る
-- メッセージ内容の取得
-- 埋め込みリンク
+- リンクを埋め込み
 
 ## 音声の権限
 - 接続
-- 音声
+- 発言
+
+## Gateway Intent(Developer Portal 側)
+上記のインストール権限とは別に、以下の Privileged Gateway Intents を有効にしてください。読み上げ機能で発言内容を取得するために必要です。
+- Message Content Intent
+- Server Members Intent
 
 # 運用
 `.env-template` のファイル名を `.env` に修正し、DISCORD_TOKEN と GUILD_IDS を入力してください。特定のグループでしか動作しない仕様になっています。
