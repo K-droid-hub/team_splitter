@@ -373,9 +373,10 @@ class VoiceSelectView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=120)
         self.cog = cog
-        # 各話者を 1 行に「話者ボタン(押下即設定)+ 試聴ボタン」で並べる。
-        # 5 話者 = 5 行で Discord の 5 行制限にちょうど収まる
-        for row, choice in enumerate(SPEAKER_CHOICES):
+        # 各話者を「話者ボタン(押下即設定)+ 試聴ボタン」の 2 つ 1 組で並べる。
+        # 1 行に 2 話者(4 ボタン)ずつ置き、Discord の 5 行制限内(最大 10 話者)に収める
+        for index, choice in enumerate(SPEAKER_CHOICES):
+            row = index // 2
             self.add_item(VoiceButton(choice.name, choice.value, row))
             self.add_item(VoicePreviewButton(choice.name, choice.value, row))
 

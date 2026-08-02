@@ -4,13 +4,20 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-# 話者設定コマンドで提示する代表的な VOICEVOX 話者
+# 話者設定コマンドで提示する代表的な VOICEVOX 話者。
+# value は VOICEVOX のスタイル ID。青山龍星(1)=熱血・(2)=喜び のように
+# 同一キャラの声色違いは通し番号で区別する
 SPEAKER_CHOICES = [
     app_commands.Choice(name="四国めたん", value=2),
     app_commands.Choice(name="ずんだもん", value=3),
     app_commands.Choice(name="春日部つむぎ", value=8),
     app_commands.Choice(name="波音リツ", value=9),
     app_commands.Choice(name="雨晴はう", value=10),
+    app_commands.Choice(name="ちび式じい", value=42),
+    app_commands.Choice(name="青山龍星(1)", value=81),
+    app_commands.Choice(name="青山龍星(2)", value=83),
+    app_commands.Choice(name="もち子さん(喜び)", value=79),
+    app_commands.Choice(name="Voidoll", value=89),
 ]
 
 
