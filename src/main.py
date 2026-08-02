@@ -64,11 +64,6 @@ bot = MyBot()
 async def show_command(ctx: commands.Context):
     await ctx.send("HELLO")
 
-@bot.command(name="bye") # 運営用 !bye コマンド
-async def show_command(ctx: commands.Context):
-    await ctx.send("SHUTTING DOWN...")
-    await bot.close()
-
 # 起動
 TOKEN = os.getenv('DISCORD_TOKEN')
 bot.run(TOKEN)
