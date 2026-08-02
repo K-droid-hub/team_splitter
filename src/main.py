@@ -44,8 +44,11 @@ class MyBot(commands.Bot):
         GUILD_IDS = [int(gid.strip()) for gid in guild_ids_raw.split(",") if gid]
         for guild_id in GUILD_IDS:
             guild = discord.Object(id=guild_id)
-            synced = await self.tree.sync(guild=guild)
-            print(f"SYNC OK ({guild_id}): {len(synced)}")
+            try:
+                synced = await self.tree.sync(guild=guild)
+                print(f"SYNC OK ({guild_id}): {len(synced)}")
+            except discord.Forbidden:
+                print(f"⚠️ SYNC SKIP ({guild_id}): Bot が未参加か applications.commands 未付与")
 
     async def on_ready(self):
         print(f"READY: {self.user}")
@@ -60,11 +63,6 @@ bot = MyBot()
 @bot.command(name="hello") # 運営用 !hello コマンド
 async def show_command(ctx: commands.Context):
     await ctx.send("HELLO")
-
-@bot.command(name="bye") # 運営用 !bye コマンド
-async def show_command(ctx: commands.Context):
-    await ctx.send("SHUTTING DOWN...")
-    await bot.close()
 
 # 起動
 TOKEN = os.getenv('DISCORD_TOKEN')

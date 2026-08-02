@@ -28,8 +28,9 @@ services:
     depends_on:
       - voicevox
 
-    # サーバー再起動時に自動で立ち上がるようにする設定
-    restart: always
+    # クラッシュ時のみ再起動する。累積 5 回で諦め、暴走(無限ループ)を防ぐ。
+    # 正常終了(docker compose down 等)では再起動しない
+    restart: on-failure:5
 
     # ログ設定
     logging:
