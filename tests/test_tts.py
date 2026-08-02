@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import Mock, patch
 
 from src.tts_engine import VoicevoxEngine, sanitize_text
-from src.tts_manager import GuildTtsState, TtsManager
+from src.tts_manager import SAMPLE_VOICE_TEXT, GuildTtsState, TtsManager
 from src.user_voice_store import UserVoiceStore
 
 
@@ -61,6 +61,18 @@ def test_should_notify_reflects_flag():
     assert mgr.should_notify(1) is True
     assert mgr.should_notify(2) is False
     assert mgr.should_notify(3) is False
+
+
+def test_synthesize_sample_uses_fixed_text_and_given_speaker():
+    async def scenario():
+        engine = FakeEngine()
+        mgr = TtsManager(engine=engine, store=make_store())
+        wav = await mgr.synthesize_sample(speaker=8)
+        # 試聴は VC 接続を伴わず、固定サンプル文を指定話者で合成すること
+        assert engine.calls == [(SAMPLE_VOICE_TEXT, 8)]
+        assert wav == b"wav"
+
+    asyncio.run(scenario())
 
 
 def test_get_speaker_falls_back_to_default_then_uses_setting():
