@@ -7,6 +7,9 @@ import discord
 from src.tts_engine import VoicevoxEngine, sanitize_text
 from src.user_voice_store import UserVoiceStore
 
+# 声設定 UI の試聴で読み上げる固定サンプル文
+SAMPLE_VOICE_TEXT = "こんにちは、この声で読み上げます"
+
 
 @dataclasses.dataclass
 class GuildTtsState:
@@ -45,6 +48,11 @@ class TtsManager:
     def get_speaker(self, user_id):
         # 未設定の発言者は既定話者で読み上げる
         return self.user_speakers.get(user_id, self.engine.default_speaker)
+
+    # 声設定 UI の試聴用に、固定サンプル文を指定話者で合成して WAV バイト列を返す。
+    # VC 接続を伴わないので読み上げ中でなくても呼べる
+    async def synthesize_sample(self, speaker):
+        return await self.engine.synthesize_speech(SAMPLE_VOICE_TEXT, speaker)
 
     # 読み上げを開始し、ギルド用のワーカータスクを起動する
     def start_reading(self, guild_id, text_channel_id, voice_client, notify_join_leave):

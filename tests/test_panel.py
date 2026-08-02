@@ -1,8 +1,18 @@
+import asyncio
 import os
+from unittest.mock import AsyncMock, Mock
 
 os.environ.setdefault("GUILD_IDS", "0")  # panel の import 時に GUILD_IDS を参照するため
 
-from src.modules.panel import build_number_values, build_pick_counts
+from src.modules.panel import (
+    PanelCog,
+    VoiceButton,
+    VoicePreviewButton,
+    VoiceSelectView,
+    build_number_values,
+    build_pick_counts,
+)
+from src.modules.tts import SPEAKER_CHOICES
 
 
 def test_build_number_values_team_starts_at_two():
@@ -28,3 +38,72 @@ def test_build_number_values_too_few_members_returns_empty():
 def test_build_pick_counts_is_one_to_five():
     # ランダムピックの抽選数は 1〜5 の固定値
     assert build_pick_counts() == [1, 2, 3, 4, 5]
+
+
+# ---- 読み上げ声設定 View: 試聴ボタン併設 ----
+
+def make_cog():
+    # PanelCog は bot.split_team / bot.tts_manager を参照するので最小限用意する
+    bot = Mock()
+    bot.split_team = Mock()
+    bot.tts_manager = Mock()
+    return PanelCog(bot)
+
+
+def test_voice_select_view_pairs_speaker_with_preview_per_row():
+    async def scenario():
+        view = VoiceSelectView(make_cog())
+        speakers = view.children[0::2]
+        previews = view.children[1::2]
+        # 各話者が「話者ボタン + 試聴ボタン」の 2 つを持つこと
+        assert len(view.children) == len(SPEAKER_CHOICES) * 2
+        assert all(isinstance(b, VoiceButton) for b in speakers)
+        assert all(isinstance(b, VoicePreviewButton) for b in previews)
+        for row, choice in enumerate(SPEAKER_CHOICES):
+            # 話者と試聴が同じ行に並び、同じ話者を指すこと
+            assert speakers[row].label == choice.name
+            assert speakers[row].row == row
+            assert previews[row].row == row
+            assert previews[row].speaker_value == choice.value
+
+    asyncio.run(scenario())
+
+
+def test_run_preview_voice_defers_and_sends_sample_file():
+    async def scenario():
+        cog = make_cog()
+        cog.bot.tts_manager.synthesize_sample = AsyncMock(return_value=b"WAV")
+        interaction = Mock()
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+
+        await cog.run_preview_voice(interaction, speaker_value=8, speaker_name="春日部つむぎ")
+
+        # 3 秒制限を避けるため先に ephemeral で defer すること
+        interaction.response.defer.assert_awaited_once()
+        assert interaction.response.defer.call_args.kwargs["ephemeral"] is True
+        cog.bot.tts_manager.synthesize_sample.assert_awaited_once_with(8)
+        # 合成した WAV を ephemeral 添付で送ること
+        send_kwargs = interaction.followup.send.call_args.kwargs
+        assert send_kwargs["ephemeral"] is True
+        assert send_kwargs["file"].filename == "sample.wav"
+
+    asyncio.run(scenario())
+
+
+def test_run_preview_voice_reports_synthesis_failure():
+    async def scenario():
+        cog = make_cog()
+        cog.bot.tts_manager.synthesize_sample = AsyncMock(side_effect=RuntimeError("boom"))
+        interaction = Mock()
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+
+        await cog.run_preview_voice(interaction, speaker_value=3, speaker_name="ずんだもん")
+
+        # 合成失敗を握りつぶさず、ファイルなしのエラーメッセージを ephemeral で返すこと
+        send_kwargs = interaction.followup.send.call_args.kwargs
+        assert "file" not in send_kwargs
+        assert send_kwargs["ephemeral"] is True
+
+    asyncio.run(scenario())

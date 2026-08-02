@@ -1,3 +1,5 @@
+import io
+
 import discord, os
 from discord import app_commands
 from discord.ext import commands
@@ -75,7 +77,7 @@ def make_manual_embed():
     embed.add_field(
         name="読み上げ(TTS)",
         value=(
-            "**読み上げ声設定**: *あなたの読み上げ音声を選びます*\n"
+            "**読み上げ声設定**: *あなたの読み上げ音声を選びます(🔊試聴で聴き比べ可)*\n"
             "**読み上げ開始 / 終了**: *パネルのボタンで読み上げを切り替えます*\n"
             "**/読み上げ開始**: *入退室通知ありなど詳細指定で開始します*\n"
             "**/読み上げ終了**: *読み上げを終了します*"
@@ -346,10 +348,10 @@ class DeleteView(discord.ui.View):
         self.add_item(DeleteExecuteButton(row=execute_row))
 
 
-# ---- 読み上げ声設定: 話者を押下即設定(本人のみ) ----
+# ---- 読み上げ声設定: 話者を押下即設定(本人のみ)+ 試聴 ----
 class VoiceButton(discord.ui.Button):
-    def __init__(self, speaker_name, speaker_value):
-        super().__init__(label=speaker_name, style=discord.ButtonStyle.primary)
+    def __init__(self, speaker_name, speaker_value, row):
+        super().__init__(label=speaker_name, style=discord.ButtonStyle.primary, row=row)
         self.speaker_name = speaker_name
         self.speaker_value = speaker_value
 
@@ -357,12 +359,25 @@ class VoiceButton(discord.ui.Button):
         await self.view.cog.run_set_voice(interaction, self.speaker_value, self.speaker_name)
 
 
+class VoicePreviewButton(discord.ui.Button):
+    def __init__(self, speaker_name, speaker_value, row):
+        super().__init__(label="🔊試聴", style=discord.ButtonStyle.secondary, row=row)
+        self.speaker_name = speaker_name
+        self.speaker_value = speaker_value
+
+    async def callback(self, interaction):
+        await self.view.cog.run_preview_voice(interaction, self.speaker_value, self.speaker_name)
+
+
 class VoiceSelectView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=120)
         self.cog = cog
-        for choice in SPEAKER_CHOICES:
-            self.add_item(VoiceButton(choice.name, choice.value))
+        # 各話者を 1 行に「話者ボタン(押下即設定)+ 試聴ボタン」で並べる。
+        # 5 話者 = 5 行で Discord の 5 行制限にちょうど収まる
+        for row, choice in enumerate(SPEAKER_CHOICES):
+            self.add_item(VoiceButton(choice.name, choice.value, row))
+            self.add_item(VoicePreviewButton(choice.name, choice.value, row))
 
 
 # ---- 意気込み入力(モーダル) ----
@@ -647,6 +662,26 @@ class PanelCog(commands.Cog):
         )
         await interaction.response.edit_message(
             content=f"あなたの声を「{speaker_name}」に設定しました。", view=None
+        )
+
+    # 選択中の話者でサンプル音声を合成し、本人だけに聞こえる ephemeral 添付で試聴させる。
+    # 設定は変えず、声設定 View も残したまま何度でも聴き比べできるようにする
+    async def run_preview_voice(self, interaction, speaker_value, speaker_name):
+        # 合成に時間がかかっても 3 秒制限で落ちないよう、先に応答を保留する
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            wav = await self.bot.tts_manager.synthesize_sample(speaker_value)
+        except Exception as e:
+            # 合成失敗を握りつぶさず、原因の手掛かりとともに通知する
+            print(f"❌ 試聴音声の合成に失敗: {e}")
+            await interaction.followup.send(
+                "試聴音声の生成に失敗しました。VOICEVOX エンジンが起動しているか確認してください。",
+                ephemeral=True,
+            )
+            return
+        sample_file = discord.File(io.BytesIO(wav), filename="sample.wav")
+        await interaction.followup.send(
+            content=f"「{speaker_name}」の試聴音声です。", file=sample_file, ephemeral=True
         )
 
     # ---- 実行本体 ----
