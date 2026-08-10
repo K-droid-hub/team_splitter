@@ -6,6 +6,7 @@ os.environ.setdefault("GUILD_IDS", "0")  # panel の import 時に GUILD_IDS を
 
 from src.modules.panel import (
     PanelCog,
+    PanelView,
     VoiceButton,
     VoicePreviewButton,
     VoiceSelectView,
@@ -119,5 +120,89 @@ def test_run_preview_voice_reports_synthesis_failure():
         send_kwargs = interaction.followup.send.call_args.kwargs
         assert "file" not in send_kwargs
         assert send_kwargs["ephemeral"] is True
+
+    asyncio.run(scenario())
+
+
+# ---- パネルのラベルはギルド全体ではなくチャンネル単位で決まる ----
+
+def make_channel(channel_id, guild_id):
+    channel = Mock()
+    channel.id = channel_id
+    channel.guild.id = guild_id
+    channel.send = AsyncMock(return_value=Mock())
+    return channel
+
+
+def test_repost_panel_shows_start_on_non_reading_channel():
+    # 別チャンネルで読み上げ中でも、非対象チャンネルのボタンは「読み上げ開始」
+    async def scenario():
+        cog = make_cog()
+        cog.bot.tts_manager.is_target_channel = Mock(return_value=False)
+        channel = make_channel(channel_id=100, guild_id=1)
+
+        await cog.repost_panel(channel)
+
+        cog.bot.tts_manager.is_target_channel.assert_called_once_with(1, 100)
+        view = channel.send.call_args.kwargs["view"]
+        assert view.tts_toggle.label == "読み上げ開始"
+
+    asyncio.run(scenario())
+
+
+def test_repost_panel_shows_stop_on_reading_channel():
+    # 読み上げ対象チャンネルのボタンだけが「読み上げ終了」
+    async def scenario():
+        cog = make_cog()
+        cog.bot.tts_manager.is_target_channel = Mock(return_value=True)
+        channel = make_channel(channel_id=100, guild_id=1)
+
+        await cog.repost_panel(channel)
+
+        view = channel.send.call_args.kwargs["view"]
+        assert view.tts_toggle.label == "読み上げ終了"
+
+    asyncio.run(scenario())
+
+
+def test_toggle_tts_stops_only_on_target_channel():
+    async def scenario():
+        cog = make_cog()
+        cog.stop_tts = AsyncMock()
+        cog.start_tts = AsyncMock()
+        interaction = Mock()
+        interaction.guild_id = 1
+        interaction.channel_id = 100
+
+        # 対象チャンネルなら終了へ
+        cog.bot.tts_manager.is_target_channel = Mock(return_value=True)
+        await cog.toggle_tts(interaction)
+        cog.stop_tts.assert_awaited_once()
+        cog.start_tts.assert_not_awaited()
+
+        # 非対象チャンネルなら開始へ
+        cog.stop_tts.reset_mock()
+        cog.bot.tts_manager.is_target_channel = Mock(return_value=False)
+        await cog.toggle_tts(interaction)
+        cog.start_tts.assert_awaited_once()
+        cog.stop_tts.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_start_tts_refuses_when_reading_elsewhere():
+    # 別チャンネルで読み上げ中なら、VC 接続せず拒否メッセージを返す
+    async def scenario():
+        cog = make_cog()
+        cog.bot.tts_manager.is_reading = Mock(return_value=True)
+        interaction = Mock()
+        interaction.response.send_message = AsyncMock()
+        interaction.user.voice.channel.connect = AsyncMock()
+
+        await cog.start_tts(interaction)
+
+        interaction.response.send_message.assert_awaited_once()
+        assert interaction.response.send_message.call_args.kwargs["ephemeral"] is True
+        interaction.user.voice.channel.connect.assert_not_awaited()
 
     asyncio.run(scenario())

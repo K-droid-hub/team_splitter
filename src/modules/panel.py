@@ -506,17 +506,21 @@ class PanelCog(commands.Cog):
                 await old.delete()
             except discord.HTTPException:
                 pass
-        is_reading = self.bot.tts_manager.is_reading(channel.guild.id)
+        # ラベルはギルド全体ではなく、このチャンネルが読み上げ対象かで決める
+        is_reading = self.bot.tts_manager.is_target_channel(channel.guild.id, channel.id)
         message = await channel.send(embed=make_panel_embed(), view=PanelView(self, is_reading))
         self.panel_messages[channel.id] = message
 
     # 読み上げの自動終了など、パネル外の状態変化を既存パネルのボタンへ反映する。
     # 貼り直すと位置が動いて煩わしいので、その場でビューだけ差し替える
     async def refresh_panels(self, guild):
-        is_reading = self.bot.tts_manager.is_reading(guild.id)
         for channel_id, message in list(self.panel_messages.items()):
             if message.guild is None or message.guild.id != guild.id:
                 continue
+            # パネルごとに、そのチャンネルが読み上げ対象かでラベルを決める
+            is_reading = self.bot.tts_manager.is_target_channel(
+                guild.id, message.channel.id
+            )
             try:
                 await message.edit(view=PanelView(self, is_reading))
             except discord.HTTPException:
@@ -622,12 +626,21 @@ class PanelCog(commands.Cog):
 
     # 読み上げ状態に応じて開始・終了を切り替える
     async def toggle_tts(self, interaction):
-        if self.bot.tts_manager.is_reading(interaction.guild_id):
+        # このチャンネルが読み上げ対象のときだけ「終了」、それ以外は「開始」
+        if self.bot.tts_manager.is_target_channel(
+            interaction.guild_id, interaction.channel_id
+        ):
             await self.stop_tts(interaction)
         else:
             await self.start_tts(interaction)
 
     async def start_tts(self, interaction):
+        # 別チャンネルで読み上げ中なら、/読み上げ開始 と同様に拒否する
+        if self.bot.tts_manager.is_reading(interaction.guild_id):
+            await interaction.response.send_message(
+                "すでに別のチャンネルで読み上げ中です。", ephemeral=True
+            )
+            return
         if interaction.user.voice is None:
             await interaction.response.send_message(
                 "ボイスチャンネルに入ってから押してください。", ephemeral=True
