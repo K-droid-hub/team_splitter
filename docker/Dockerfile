@@ -5,9 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
-# discord.py の音声送信に ffmpeg が必要
+# discord.py の音声送信に ffmpeg が必要。読み上げと音楽をミキサーで重ねて
+# Python 側で Opus に変換するため、libopus も入れる
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg libopus0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

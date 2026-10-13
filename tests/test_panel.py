@@ -259,20 +259,88 @@ def test_toggle_tts_stops_only_on_target_channel():
     asyncio.run(scenario())
 
 
-def test_start_tts_refuses_when_reading_elsewhere():
-    # 別チャンネルで読み上げ中なら、VC 接続せず拒否メッセージを返す
+def make_tts_interaction():
+    interaction = Mock()
+    interaction.channel_id = 100
+    interaction.response.defer = AsyncMock()
+    interaction.response.send_message = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    return interaction
+
+
+def test_start_tts_refuses_when_voice_channel_reads_another_channel():
+    # 同じボイスチャンネルで別のテキストチャンネルを読み上げ中なら、接続せず断る
     async def scenario():
         cog = make_cog()
-        cog.bot.tts_manager.is_reading = Mock(return_value=True)
-        interaction = Mock()
-        interaction.response.send_message = AsyncMock()
-        interaction.user.voice.channel.connect = AsyncMock()
+        cog.bot.tts_manager.state_for_voice = Mock(
+            return_value=SimpleNamespace(text_channel_id=555)
+        )
+        cog.bot.voice_pool.acquire = AsyncMock()
+        cog.repost_panel = AsyncMock()
+        interaction = make_tts_interaction()
 
         await cog.start_tts(interaction)
 
-        interaction.response.send_message.assert_awaited_once()
-        assert interaction.response.send_message.call_args.kwargs["ephemeral"] is True
-        interaction.user.voice.channel.connect.assert_not_awaited()
+        cog.bot.voice_pool.acquire.assert_not_awaited()
+        args, kwargs = interaction.followup.send.call_args
+        assert "<#555>" in args[0]
+        assert kwargs["ephemeral"] is True
+        cog.repost_panel.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_start_tts_runs_alongside_reading_in_another_voice_channel():
+    # 別のボイスチャンネルなら、サーバー内で他が読み上げ中でも並行して始められる
+    async def scenario():
+        cog = make_cog()
+        cog.bot.tts_manager.is_reading = Mock(return_value=True)
+        cog.bot.tts_manager.state_for_voice = Mock(return_value=None)
+        session = Mock()
+        cog.bot.voice_pool.acquire = AsyncMock(return_value=session)
+        cog.repost_panel = AsyncMock()
+        interaction = make_tts_interaction()
+
+        await cog.start_tts(interaction)
+
+        cog.bot.tts_manager.start_reading.assert_called_once_with(100, session, False)
+        cog.repost_panel.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_start_tts_reports_when_no_slot_is_free():
+    from src.voice_pool import VoiceSlotUnavailable
+
+    async def scenario():
+        cog = make_cog()
+        cog.bot.tts_manager.state_for_voice = Mock(return_value=None)
+        cog.bot.voice_pool.acquire = AsyncMock(
+            side_effect=VoiceSlotUnavailable("同時に使えるのは 1 つまで")
+        )
+        cog.repost_panel = AsyncMock()
+        interaction = make_tts_interaction()
+
+        await cog.start_tts(interaction)
+
+        interaction.followup.send.assert_awaited_once_with(
+            "同時に使えるのは 1 つまで", ephemeral=True
+        )
+        cog.bot.tts_manager.start_reading.assert_not_called()
+
+    asyncio.run(scenario())
+
+
+def test_stop_tts_stops_this_text_channel():
+    async def scenario():
+        cog = make_cog()
+        cog.bot.tts_manager.stop_reading = AsyncMock()
+        cog.repost_panel = AsyncMock()
+        interaction = make_tts_interaction()
+
+        await cog.stop_tts(interaction)
+
+        cog.bot.tts_manager.stop_reading.assert_awaited_once_with(100)
 
     asyncio.run(scenario())
 

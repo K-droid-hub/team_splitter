@@ -5,6 +5,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from src.voice_pool import VoiceSlotUnavailable
+from src.voice_session import USE_TTS
+
 # 読み上げ声の一覧。name は UI 表示名、description は名前だけでは声質が分からない
 # 話者のための短い手がかり。id は VOICEVOX のスタイル ID で、青山龍星は同一キャラの
 # 声色違い((1)=熱血・(2)=喜び)なので通し番号で区別する
@@ -41,6 +44,34 @@ def find_speaker(speaker_id):
     return _SPEAKERS_BY_ID.get(speaker_id)
 
 
+# /読み上げ開始 とパネルのボタンで共通の開始処理。応答を保留(defer)してから呼ぶ。
+# 失敗したときは利用者向けの文言を、成功したときは None を返す
+async def begin_reading(bot, text_channel_id, voice_channel, notify_join_leave):
+    manager = bot.tts_manager
+    # 1 つのボイスチャンネルで読むテキストチャンネルは 1 つまで。混ざると誰の発言か分からない
+    other = manager.state_for_voice(voice_channel.id)
+    if other is not None:
+        return f"このボイスチャンネルでは <#{other.text_channel_id}> の発言を読み上げ中です。"
+    try:
+        session = await bot.voice_pool.acquire(voice_channel, USE_TTS)
+    except VoiceSlotUnavailable as e:
+        return str(e)
+    except Exception as e:
+        # 接続失敗を握りつぶさず、原因の手掛かりとともに通知する
+        print(f"❌ VC 接続に失敗: {e}")
+        return (
+            "ボイスチャンネルへの接続に失敗しました。"
+            "PyNaCl・ffmpeg・libopus が導入されているか確認してください。"
+        )
+    # 接続を待つ間に、別のテキストチャンネルから同じボイスチャンネルで始められていたら譲る。
+    # 相手が読み上げとして接続を使っているので、こちらからは手放さない
+    other = manager.state_for_voice(voice_channel.id)
+    if other is not None:
+        return f"このボイスチャンネルでは <#{other.text_channel_id}> の発言を読み上げ中です。"
+    manager.start_reading(text_channel_id, session, notify_join_leave)
+    return None
+
+
 class Tts(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -58,30 +89,19 @@ class Tts(commands.Cog):
                 "ボイスチャンネルに入ってから実行してください。", ephemeral=True
             )
             return
-        if self.tts_manager.is_reading(interaction.guild_id):
+        if self.tts_manager.is_target_channel(interaction.guild_id, interaction.channel_id):
             await interaction.response.send_message(
-                "すでに読み上げ中です。", ephemeral=True
+                "すでにこのチャンネルで読み上げ中です。", ephemeral=True
             )
             return
         # VC 接続に時間がかかっても 3 秒制限で落ちないよう応答を保留する
         await interaction.response.defer()
-        try:
-            voice_client = await interaction.user.voice.channel.connect()
-        except Exception as e:
-            # 接続失敗を握りつぶさず、原因の手掛かりとともに通知する
-            print(f"❌ VC 接続に失敗: {e}")
-            await interaction.followup.send(
-                "ボイスチャンネルへの接続に失敗しました。"
-                "PyNaCl・ffmpeg が導入されているか確認してください。",
-                ephemeral=True,
-            )
-            return
-        self.tts_manager.start_reading(
-            interaction.guild_id,
-            interaction.channel_id,
-            voice_client,
-            入退室通知,
+        error = await begin_reading(
+            self.bot, interaction.channel_id, interaction.user.voice.channel, 入退室通知
         )
+        if error is not None:
+            await interaction.followup.send(error, ephemeral=True)
+            return
         embed = discord.Embed(color=discord.Color.green())
         embed.add_field(
             name="読み上げ開始",
@@ -93,12 +113,13 @@ class Tts(commands.Cog):
     @app_commands.command(name="読み上げ終了")
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
     async def stop_reading(self, interaction: discord.Interaction):
-        if not self.tts_manager.is_reading(interaction.guild_id):
+        text_channel_id = self._reading_target(interaction)
+        if text_channel_id is None:
             await interaction.response.send_message(
                 "読み上げは開始されていません。", ephemeral=True
             )
             return
-        await self.tts_manager.stop_reading(interaction.guild_id)
+        await self.tts_manager.stop_reading(text_channel_id)
         embed = discord.Embed(color=discord.Color.green())
         embed.add_field(name="読み上げ終了", value="読み上げを終了しました。", inline=False)
         await interaction.response.send_message(embed=embed)
@@ -122,14 +143,40 @@ class Tts(commands.Cog):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    # 終了する読み上げを決める。このチャンネルが読み上げ対象ならそれを、
+    # そうでなければ実行者のいるボイスチャンネルの読み上げを対象にする
+    def _reading_target(self, interaction):
+        if self.tts_manager.is_target_channel(interaction.guild_id, interaction.channel_id):
+            return interaction.channel_id
+        voice = interaction.user.voice
+        if voice is None:
+            return None
+        state = self.tts_manager.state_for_voice(voice.channel.id)
+        return None if state is None else state.text_channel_id
+
+    def _is_command(self, content):
+        prefix = self.bot.command_prefix
+        # command_prefix は文字列と複数指定のどちらも取り得る。
+        # 関数を渡す形には対応しないので、その場合は読み上げ対象のままにする
+        if isinstance(prefix, str):
+            prefixes = (prefix,)
+        elif isinstance(prefix, (tuple, list)):
+            prefixes = tuple(prefix)
+        else:
+            return False
+        return content.startswith(prefixes)
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:
             return
         if not self.tts_manager.is_target_channel(message.guild.id, message.channel.id):
             return
+        # !play などのコマンドは読み上げても意味がないので飛ばす
+        if self._is_command(message.content):
+            return
         self.tts_manager.enqueue_message(
-            message.guild.id,
+            message.channel.id,
             message.content,
             message.author.id,
             message.author.display_name,
@@ -137,32 +184,40 @@ class Tts(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
-        guild_id = member.guild.id
-        if not self.tts_manager.is_reading(guild_id):
-            return
-        voice_client = member.guild.voice_client
-        if voice_client is None:
-            return
-        bot_channel = voice_client.channel
         # bot 自身の状態変化は無視する
         if member.bot:
             return
-        # 入退室通知
-        if self.tts_manager.should_notify(guild_id):
-            joined = before.channel != bot_channel and after.channel == bot_channel
-            left = before.channel == bot_channel and after.channel != bot_channel
-            if joined:
-                self.tts_manager.enqueue_notice(guild_id, f"{member.display_name} が入室しました")
-            elif left:
-                self.tts_manager.enqueue_notice(guild_id, f"{member.display_name} が退室しました")
-        # bot 以外が誰もいなくなったら自動退出する
-        remaining = [m for m in bot_channel.members if not m.bot]
-        if not remaining:
-            await self.tts_manager.stop_reading(guild_id)
-            # パネルのボタン表示を 読み上げ開始 に戻す
-            panel_cog = self.bot.get_cog("PanelCog")
-            if panel_cog is not None:
-                await panel_cog.refresh_panels(member.guild)
+        before_id = before.channel.id if before.channel is not None else None
+        after_id = after.channel.id if after.channel is not None else None
+        # ミュート切り替えなど、チャンネルが変わらない変化は対象外
+        if before_id == after_id:
+            return
+        # 読み上げはボイスチャンネルごとなので、入った先・出た元それぞれで通知する
+        if after_id is not None:
+            state = self.tts_manager.state_for_voice(after_id)
+            if state is not None and state.notify_join_leave:
+                self.tts_manager.enqueue_notice(
+                    state.text_channel_id, f"{member.display_name} が入室しました"
+                )
+        if before_id is None:
+            return
+        state = self.tts_manager.state_for_voice(before_id)
+        if state is None:
+            return
+        if state.notify_join_leave:
+            self.tts_manager.enqueue_notice(
+                state.text_channel_id, f"{member.display_name} が退室しました"
+            )
+        # bot 以外が誰もいなくなったら自動退出する。読み上げているのが 2 体目の bot でも、
+        # メンバーはメイン bot 側から数えられる
+        channel = self.bot.get_channel(before_id)
+        if channel is None or any(not m.bot for m in channel.members):
+            return
+        await self.tts_manager.stop_reading(state.text_channel_id)
+        # パネルのボタン表示を 読み上げ開始 に戻す
+        panel_cog = self.bot.get_cog("PanelCog")
+        if panel_cog is not None:
+            await panel_cog.refresh_panels(member.guild)
 
 
 # Cog 登録

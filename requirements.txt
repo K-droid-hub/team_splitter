@@ -4,3 +4,4 @@ certifi
 PyNaCl
 davey
 aiohttp
+yt-dlp

@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.grouping import format_member_list  # 一覧表示の意気込み整形を共有
-from src.modules.tts import SPEAKERS, find_speaker  # 読み上げ声設定の話者一覧を共有
+from src.modules.tts import SPEAKERS, begin_reading, find_speaker  # 話者一覧と開始処理を共有
 from src.pokemons import get_pokemons, pick_pokemons, to_japanese_name
 
 MAX_NUMBER_BUTTONS = 5  # 数値ボタンの最大表示数
@@ -891,12 +891,6 @@ class PanelCog(commands.Cog):
             await self.start_tts(interaction)
 
     async def start_tts(self, interaction):
-        # 別チャンネルで読み上げ中なら、/読み上げ開始 と同様に拒否する
-        if self.bot.tts_manager.is_reading(interaction.guild_id):
-            await interaction.response.send_message(
-                "すでに別のチャンネルで読み上げ中です。", ephemeral=True
-            )
-            return
         if interaction.user.voice is None:
             await interaction.response.send_message(
                 "ボイスチャンネルに入ってから押してください。", ephemeral=True
@@ -904,25 +898,19 @@ class PanelCog(commands.Cog):
             return
         # VC 接続に時間がかかっても 3 秒制限で落ちないよう応答を保留する
         await interaction.response.defer()
-        try:
-            voice_client = await interaction.user.voice.channel.connect()
-        except Exception as e:
-            # 接続失敗を握りつぶさず、原因の手掛かりとともに通知する
-            print(f"❌ VC 接続に失敗: {e}")
-            await interaction.followup.send(
-                "ボイスチャンネルへの接続に失敗しました。"
-                "PyNaCl・ffmpeg が導入されているか確認してください。",
-                ephemeral=True,
-            )
-            return
-        self.bot.tts_manager.start_reading(
-            interaction.guild_id, interaction.channel_id, voice_client, False
+        # 別のボイスチャンネルなら、他のテキストチャンネルが読み上げ中でも並行して始められる。
+        # 断る条件(同じボイスチャンネルで読み上げ中・空き不足)は /読み上げ開始 と共通
+        error = await begin_reading(
+            self.bot, interaction.channel_id, interaction.user.voice.channel, False
         )
+        if error is not None:
+            await interaction.followup.send(error, ephemeral=True)
+            return
         await self.repost_panel(interaction.channel)
 
     async def stop_tts(self, interaction):
         await interaction.response.defer()
-        await self.bot.tts_manager.stop_reading(interaction.guild_id)
+        await self.bot.tts_manager.stop_reading(interaction.channel_id)
         await self.repost_panel(interaction.channel)
 
     # 読み上げ声は本人だけの設定なので、公開せず ephemeral で完結させる
