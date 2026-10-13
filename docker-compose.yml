@@ -19,6 +19,8 @@ services:
       - VOICE_DB_PATH=/app/data/voices.db
       # 意気込みの DB ファイル置き場（同じ named volume 上）
       - ASPIRATION_DB_PATH=/app/data/aspirations.db
+      # 設置済みパネルの位置の DB ファイル置き場（同じ named volume 上）
+      - PANEL_DB_PATH=/app/data/panels.db
 
     # 読み上げ声設定 DB を永続化する。リビルドしても設定が消えないようにする
     volumes:

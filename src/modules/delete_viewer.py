@@ -15,7 +15,7 @@ class DeleteViewer(commands.Cog):
     @app_commands.describe(名前="名前")
 
     async def delete_viewer(self, interaction: discord.Interaction, 名前: str):
-        results = self.split_team.delete_special(名前, isViewer=True, isPriority=False)
+        results = self.split_team.delete_special(interaction, 名前, isViewer=True, isPriority=False)
         embed = discord.Embed(color=discord.Color.blue())
         embed.add_field(name="観戦者解除", value=results, inline=False)
         await interaction.response.send_message(embed=embed)

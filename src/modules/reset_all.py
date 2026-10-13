@@ -14,7 +14,8 @@ class ResetAll(commands.Cog):
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
 
     async def reset_command(self, interaction: discord.Interaction):
-        self.split_team.reset_all()
+        # 実行したサーバーの登録だけ解除する(他サーバーへ波及させない)
+        self.split_team.reset_all(interaction)
         embed = discord.Embed(color=discord.Color.black())
         embed.add_field(name="リセット", value="ALL RESET DONE", inline=False)
         await interaction.response.send_message(embed=embed)

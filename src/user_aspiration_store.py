@@ -46,14 +46,14 @@ class UserAspirationStore:
         )
         self.connection.commit()
 
-    # 保存済みの意気込みを (guild_id, display_name) -> aspiration の dict で返す。
-    # 表示は名前ベースなので、空の意気込み・名前欠落の行は除外する
-    def load_aspirations_by_name(self):
+    # 保存済みの意気込みを (guild_id, user_id) -> aspiration の dict で返す。
+    # 表示名ではなく user_id で引き当てるので、ニックネームを変えても消えない
+    def load_aspirations_by_user(self):
         rows = self.connection.execute(
-            "SELECT guild_id, display_name, aspiration FROM user_aspirations"
+            "SELECT guild_id, user_id, aspiration FROM user_aspirations"
         ).fetchall()
         return {
-            (guild_id, display_name): aspiration
-            for guild_id, display_name, aspiration in rows
-            if display_name and aspiration
+            (guild_id, user_id): aspiration
+            for guild_id, user_id, aspiration in rows
+            if aspiration
         }
