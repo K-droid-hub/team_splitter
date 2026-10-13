@@ -14,7 +14,7 @@ class DeletePriority(commands.Cog):
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
 
     async def delete_priority(self, interaction: discord.Interaction, 名前: str):
-        results = self.split_team.delete_special(名前, isViewer=False, isPriority=True)
+        results = self.split_team.delete_special(interaction, 名前, isViewer=False, isPriority=True)
         embed = discord.Embed(color=discord.Color.blue())
         embed.add_field(name="優先から削除", value=results, inline=False)
         await interaction.response.send_message(embed=embed)

@@ -2,6 +2,7 @@ import discord, os, ssl, certifi
 from dotenv import load_dotenv
 from discord.ext import commands
 from src.grouping import SplitTeam # コンテナ化すると src. を指定する必要あり。vscode 直実行では不要
+from src.panel_store import PanelStore
 from src.tts_manager import TtsManager
 
 ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -16,6 +17,8 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         self.split_team = SplitTeam()
         self.tts_manager = TtsManager()
+        # 設置済みパネルの位置。再起動後も古いパネルを消せるよう永続化する
+        self.panel_store = PanelStore()
 
     async def setup_hook(self):
         # モジュールのロード

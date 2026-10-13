@@ -8,6 +8,8 @@ from src.user_aspiration_store import UserAspirationStore
 @dataclasses.dataclass
 class player:
     name: str
+    # 表示名は改名で変わるため、識別は user_id で行う(0 は未設定)
+    user_id: int = 0
     priority: bool = False
     viewer: bool = False
     rockedFlag: bool = False
@@ -29,12 +31,17 @@ def format_member_list(members):
 
 class SplitTeam:
     def __init__(self, aspiration_store=None):
-        self.channel_members = [] # player クラスのインスタンスのリスト
+        # (guild_id, ボイスチャンネル id) ごとのメンバー状態。1 本のリストを共有すると
+        # 別サーバー・別 VC で set_member が走るたびに観戦者/優先者の登録が消えるため、
+        # VC 単位に分けて保持する
+        self.members_by_channel = {}
+        # 直近に set_member した VC のリスト(members_by_channel の要素と同じ参照)
+        self.channel_members = []
         self.memberSize = 0
         self.vc_err = '実行できません。ボイスチャンネルに入ってコマンドを実行してください。'
-        # 意気込みは DB に永続化し、名前ベースで引き当てられるよう辞書で保持する
+        # 意気込みは DB に永続化し、user_id で引き当てられるよう辞書で保持する
         self.aspiration_store = aspiration_store or UserAspirationStore()
-        self.aspirations_by_name = self.aspiration_store.load_aspirations_by_name()
+        self.aspirations_by_user = self.aspiration_store.load_aspirations_by_user()
         
     # VCメンバーのセット
     def set_member(self, interaction_or_ctx):
@@ -43,35 +50,44 @@ class SplitTeam:
             state = interaction_or_ctx.user.voice
         else:
             state = interaction_or_ctx.author.voice
-        guild_id = interaction_or_ctx.guild.id
         if state is None:
             return False
-        # 現在のネームリストを取得 (bot は除く)
-        current_vc_members = [
-            i.display_name for i in state.channel.members 
-            if not i.bot
-        ]
-        # 前回実行時からいなくなったメンバーを削除
-        self.channel_members = [p for p in self.channel_members if p.name in current_vc_members]
-        # 既存メンバーのネームリスト
-        existing_names = [p.name for p in self.channel_members]
+        guild_id = interaction_or_ctx.guild.id
+        # 操作対象はコマンド実行者が入っている VC。サーバーと VC の組で状態を引く
+        key = (guild_id, state.channel.id)
+        # 現在の VC メンバーを user_id -> 表示名 で取得 (bot は除く)
+        current_vc_members = {i.id: i.display_name for i in state.channel.members if not i.bot}
+        members = self.members_by_channel.get(key, [])
+        # 前回実行時からいなくなったメンバーを削除。照合は user_id なので改名しても残る
+        members = [p for p in members if p.user_id in current_vc_members]
+        existing_ids = {p.user_id for p in members}
         # 前回実行時との差分をとり、既存のメンバーの情報を引き継ぎつつ、メンバーリストを更新
-        for name in current_vc_members:
-            if name not in existing_names:
-                self.channel_members.append(player(name=name))
-        # DB 更新を反映するため、毎回全メンバーの意気込みを引き当て直す(サーバー単位)
-        for p in self.channel_members:
-            p.aspiration = self.aspirations_by_name.get((guild_id, p.name), "")
-        self.memberSize = len(self.channel_members)
+        for user_id, display_name in current_vc_members.items():
+            if user_id not in existing_ids:
+                members.append(player(name=display_name, user_id=user_id))
+        for p in members:
+            # 表示名は改名に追従させ、意気込みは user_id で引き当てる(サーバー単位)
+            p.name = current_vc_members[p.user_id]
+            p.aspiration = self.aspirations_by_user.get((guild_id, p.user_id), "")
+        self.members_by_channel[key] = members
+        self.channel_members = members
+        self.memberSize = len(members)
         return True
 
-    # 意気込みを DB へ保存し、名前ベースの辞書も更新する。空文字は削除扱い
+    # 意気込みを DB へ保存し、user_id ベースの辞書も更新する。空文字は削除扱い
     def set_aspiration(self, guild_id, user_id, display_name, aspiration):
         self.aspiration_store.set_aspiration(guild_id, user_id, aspiration, display_name)
         if aspiration:
-            self.aspirations_by_name[(guild_id, display_name)] = aspiration
+            self.aspirations_by_user[(guild_id, user_id)] = aspiration
         else:
-            self.aspirations_by_name.pop((guild_id, display_name), None)
+            self.aspirations_by_user.pop((guild_id, user_id), None)
+        # 保持中のメンバーにも即反映する(同じサーバーの全 VC が対象)
+        for (target_guild_id, _), members in self.members_by_channel.items():
+            if target_guild_id != guild_id:
+                continue
+            for p in members:
+                if p.user_id == user_id:
+                    p.aspiration = aspiration
 
     def makeTable(self, ctx, main_factor, main_factor_name):  
         #チャンネルメンバーリセット & チャンネルに誰もいなかった時の処理
@@ -145,7 +161,18 @@ class SplitTeam:
                 player.viewer = False
         return '\n'.join(results)
 
-    def add_special(self, ctx, addName, isViewer, isPriority, isRocked):
+    # パネルは user_id で対象を指定する(同名のメンバーがいても取り違えない)。
+    # 名前指定のスラッシュコマンド用に、user_id が無ければ表示名で探す
+    def find_member(self, name=None, user_id=None):
+        for member in self.channel_members:
+            if user_id is not None:
+                if member.user_id == user_id:
+                    return member
+            elif member.name == name:
+                return member
+        return None
+
+    def add_special(self, ctx, addName, isViewer, isPriority, isRocked, user_id=None):
         # フラッグでどちらを追加するか決定
         if isViewer:
             main_factor_name = "観戦者"
@@ -154,53 +181,58 @@ class SplitTeam:
         #チャンネルメンバー再セット & チャンネルに誰もいなかった時の処理
         if self.set_member(ctx) is False: 
             return self.vc_err
-        for member in self.channel_members:
-            if member.name == addName:
-                if isViewer:
-                    if member.priority: # 優先者だった場合解除する
-                        member.priority = False
-                        member.rockedFlag = False
-                    member.viewer = True 
-                elif isPriority:
-                    if member.viewer: # 観戦者だった場合解除する
-                        member.viewer = False
-                        member.rockedFlag = False
-                    member.priority = True
-                if isRocked:
-                    member.rockedFlag = True
-                    result = f"{main_factor_name}にして固定しました"
-                else:
-                    result = f"次だけ{main_factor_name}にしました"
-                result += f" \n{addName}"
-                break
+        member = self.find_member(addName, user_id)
+        if member is None:
+            return "メンバーが見つかりません"
+        if isViewer:
+            if member.priority: # 優先者だった場合解除する
+                member.priority = False
+                member.rockedFlag = False
+            member.viewer = True 
+        elif isPriority:
+            if member.viewer: # 観戦者だった場合解除する
+                member.viewer = False
+                member.rockedFlag = False
+            member.priority = True
+        if isRocked:
+            member.rockedFlag = True
+            result = f"{main_factor_name}にして固定しました"
         else:
-            result = "メンバーが見つかりません"
-        return result
+            result = f"次だけ{main_factor_name}にしました"
+        return result + f" \n{member.name}"
 
-    def delete_special(self, deleteName, isViewer, isPriority):
+    def delete_special(self, ctx, deleteName, isViewer, isPriority, user_id=None):
         # フラッグでどちらを削除するか決定
         if isViewer:
             main_factor_name = "観戦者"
         else:
             main_factor_name = "優先者"
-        for member in self.channel_members:
-            if member.name == deleteName:
-                if isViewer and member.viewer:               
-                    member.viewer = False 
-                    member.rockedFlag = False
-                    result = f"{main_factor_name}を解除しました。"
-                elif isPriority and member.priority:
-                    member.priority = False
-                    member.rockedFlag = False 
-                    result = (f"{main_factor_name}を解除しました。")
-                else:
-                    result = f"そのメンバーは{main_factor_name}ではありません"
-                result += f" \n{deleteName}"
-                break
+        # 解除も今の VC を読み直してから行う(別 VC の古いリストを触らないため)
+        if self.set_member(ctx) is False:
+            return self.vc_err
+        member = self.find_member(deleteName, user_id)
+        if member is None:
+            return "メンバーが見つかりません"
+        if isViewer and member.viewer:
+            member.viewer = False 
+            member.rockedFlag = False
+            result = f"{main_factor_name}を解除しました。"
+        elif isPriority and member.priority:
+            member.priority = False
+            member.rockedFlag = False 
+            result = f"{main_factor_name}を解除しました。"
         else:
-            result = "メンバーが見つかりません"
-        return result
+            result = f"そのメンバーは{main_factor_name}ではありません"
+        return result + f" \n{member.name}"
 
-    def reset_all(self):
-        self.channel_members.clear()
+    # /リセット は実行したサーバーの登録だけ解除する(他サーバーへ波及させない)
+    def reset_all(self, ctx=None):
+        if ctx is None:
+            self.members_by_channel.clear()
+        else:
+            guild_id = ctx.guild.id
+            for key in [k for k in self.members_by_channel if k[0] == guild_id]:
+                del self.members_by_channel[key]
+        self.channel_members = []
+        self.memberSize = 0
         self.memberSize = 0

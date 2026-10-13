@@ -1,24 +1,44 @@
+import dataclasses
 import os
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-# 話者設定コマンドで提示する代表的な VOICEVOX 話者。
-# value は VOICEVOX のスタイル ID。青山龍星(1)=熱血・(2)=喜び のように
-# 同一キャラの声色違いは通し番号で区別する
-SPEAKER_CHOICES = [
-    app_commands.Choice(name="四国めたん", value=2),
-    app_commands.Choice(name="ずんだもん", value=3),
-    app_commands.Choice(name="春日部つむぎ", value=8),
-    app_commands.Choice(name="波音リツ", value=9),
-    app_commands.Choice(name="雨晴はう", value=10),
-    app_commands.Choice(name="ちび式じい", value=42),
-    app_commands.Choice(name="青山龍星(1)", value=81),
-    app_commands.Choice(name="青山龍星(2)", value=83),
-    app_commands.Choice(name="もち子さん(喜び)", value=79),
-    app_commands.Choice(name="Voidoll", value=89),
+# 読み上げ声の一覧。name は UI 表示名、description は名前だけでは声質が分からない
+# 話者のための短い手がかり。id は VOICEVOX のスタイル ID で、青山龍星は同一キャラの
+# 声色違い((1)=熱血・(2)=喜び)なので通し番号で区別する
+@dataclasses.dataclass(frozen=True)
+class Speaker:
+    id: int
+    name: str
+    description: str
+
+
+SPEAKERS = [
+    Speaker(2, "四国めたん", "落ち着いたトーンのはっきりした少女声"),
+    Speaker(3, "ずんだもん", "明るく元気な中性的な子供声"),
+    Speaker(8, "春日部つむぎ", "軽やかで明るい女子高生の声"),
+    Speaker(9, "波音リツ", "低めでクールな女性声"),
+    Speaker(10, "雨晴はう", "やわらかく親しみのある女性声"),
+    Speaker(42, "ちび式じい", "しゃがれた声の小さなおじいさん"),
+    Speaker(81, "青山龍星(1)", "低く力のこもった男性声"),
+    Speaker(83, "青山龍星(2)", "低めで明るく弾んだ男性声"),
+    Speaker(79, "もち子さん", "やわらかく明るい女性声"),
+    Speaker(89, "Voidoll", "無機質で機械的な声"),
 ]
+
+# スラッシュコマンドの選択肢は一覧から生成し、パネルと順番・表示名を揃える
+SPEAKER_CHOICES = [
+    app_commands.Choice(name=speaker.name, value=speaker.id) for speaker in SPEAKERS
+]
+
+_SPEAKERS_BY_ID = {speaker.id: speaker for speaker in SPEAKERS}
+
+
+def find_speaker(speaker_id):
+    # 一覧外のスタイル ID(VOICEVOX_SPEAKER に任意の値を指定した場合)では None を返す
+    return _SPEAKERS_BY_ID.get(speaker_id)
 
 
 class Tts(commands.Cog):
@@ -91,10 +111,13 @@ class Tts(commands.Cog):
         self.tts_manager.set_speaker(
             interaction.user.id, 話者.value, interaction.user.display_name
         )
+        # 名前だけでは声質が分からない話者があるので、確認にも説明を添える
+        speaker = find_speaker(話者.value)
+        detail = f"({speaker.description})" if speaker is not None else ""
         embed = discord.Embed(color=discord.Color.green())
         embed.add_field(
             name="読み上げ声設定",
-            value=f"あなたの声を「{話者.name}」に設定しました。",
+            value=f"あなたの声を「{話者.name}」{detail}に設定しました。",
             inline=False,
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)

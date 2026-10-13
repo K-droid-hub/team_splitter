@@ -49,6 +49,10 @@ class TtsManager:
         # 未設定の発言者は既定話者で読み上げる
         return self.user_speakers.get(user_id, self.engine.default_speaker)
 
+    # 自分で選んだ声か、既定の声のままかを声設定 UI で出し分けるために使う
+    def has_speaker(self, user_id):
+        return user_id in self.user_speakers
+
     # 声設定 UI の試聴用に、固定サンプル文を指定話者で合成して WAV バイト列を返す。
     # VC 接続を伴わないので読み上げ中でなくても呼べる
     async def synthesize_sample(self, speaker):
