@@ -7,8 +7,20 @@ from src.voice_session import USE_MUSIC
 
 # !queue で一度に並べる最大件数。長すぎるとメッセージ上限に当たる
 QUEUE_PREVIEW_LIMIT = 10
-# !volume で指定できる上限。これ以上は音割れしやすいので頭打ちにする
+# !volume で指定する目盛りの範囲(1〜100)。細かく選べるよう 100 段階にしている
 MAX_MUSIC_VOLUME = 100
+# 目盛り 100 が当たる実際の音量(%)。音楽は大きくなりがちなので、読み上げが埋もれないよう半分に抑える
+MUSIC_VOLUME_CEILING = 50
+
+
+# 目盛り → 実際の音量(%)
+def scale_to_percent(scale):
+    return scale * MUSIC_VOLUME_CEILING / MAX_MUSIC_VOLUME
+
+
+# 実際の音量(%) → 目盛り。表示用なので四捨五入する
+def percent_to_scale(percent):
+    return round(percent * MAX_MUSIC_VOLUME / MUSIC_VOLUME_CEILING)
 
 
 class Music(commands.Cog):
@@ -104,7 +116,7 @@ class Music(commands.Cog):
         await self.music_manager.stop(state)
         await ctx.send("⏹️ 音楽を終了しました。", silent=True)
 
-    # 音量は 0〜100 の整数。省略すると今の音量を返す
+    # 音量は 1〜MAX_MUSIC_VOLUME の目盛りで指定する。省略すると今の目盛りを返す
     @commands.command(name="volume", hidden=True)
     @commands.guild_only()
     async def volume(self, ctx, value: str = None):
@@ -113,17 +125,18 @@ class Music(commands.Cog):
             await ctx.send(error, silent=True)
             return
         if value is None:
-            await ctx.send(f"🔈 現在の音量: {state.session.music_volume()}%", silent=True)
+            scale = percent_to_scale(state.session.music_volume())
+            await ctx.send(f"🔈 現在の音量: {scale} / {MAX_MUSIC_VOLUME}", silent=True)
             return
         try:
             percent = int(value)
         except ValueError:
             percent = None
-        if percent is None or not 0 <= percent <= MAX_MUSIC_VOLUME:
-            await ctx.send(f"`!volume <0〜{MAX_MUSIC_VOLUME}>` の形で指定してください。", silent=True)
+        if percent is None or not 1 <= percent <= MAX_MUSIC_VOLUME:
+            await ctx.send(f"`!volume <1〜{MAX_MUSIC_VOLUME}>` の形で指定してください。", silent=True)
             return
-        state.session.set_music_volume(percent)
-        await ctx.send(f"🔊 音楽の音量を {percent}% にしました。", silent=True)
+        state.session.set_music_volume(scale_to_percent(percent))
+        await ctx.send(f"🔊 音楽の音量を {percent} / {MAX_MUSIC_VOLUME} にしました。", silent=True)
 
     # 今の曲を次にもう一度流す。キューの先頭へ積むだけなので、順番待ちの曲より先に鳴る
     @commands.command(name="repeat", hidden=True)

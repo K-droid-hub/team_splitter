@@ -5,6 +5,8 @@ from src.audio_mixer import MixedAudioSource, MusicStream
 # 1 つの接続を使っている機能。両方が手放したら切断して枠を返す
 USE_TTS = "tts"
 USE_MUSIC = "music"
+# 音楽の既定の音量(%)。目盛りで 50 に当たる。音楽だけが対象で、読み上げには掛からない
+DEFAULT_MUSIC_PERCENT = 25
 
 
 class VoiceSession:
@@ -17,6 +19,7 @@ class VoiceSession:
     def __init__(self, voice_client, on_close=None, loop=None):
         self.voice_client = voice_client
         self.mixer = MixedAudioSource()
+        self.mixer.set_music_volume(DEFAULT_MUSIC_PERCENT)
         self.users = set()
         self.closed = False
         self._on_close = on_close

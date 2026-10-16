@@ -9,6 +9,8 @@ MAX_READ_LENGTH = 100
 URL_PATTERN = re.compile(r"https?://\S+")
 CUSTOM_EMOJI_PATTERN = re.compile(r"<a?:\w+:\d+>")
 MENTION_PATTERN = re.compile(r"<@[!&]?\d+>|<#\d+>")
+# 読み上げの音量。VOICEVOX の volumeScale に渡す(既定は 1.0)。音楽より小さく聞こえるため上げている
+VOICE_VOLUME_SCALE = 2.0
 
 
 def sanitize_text(text):
@@ -38,6 +40,7 @@ class VoicevoxEngine:
             ) as query_res:
                 query_res.raise_for_status()
                 query = await query_res.json()
+            query["volumeScale"] = VOICE_VOLUME_SCALE
             async with session.post(
                 f"{self.base_url}/synthesis",
                 params={"speaker": speaker},

@@ -162,7 +162,7 @@ class MixedAudioSource(discord.AudioSource):
 
     def music_volume(self):
         with self._lock:
-            return round(self._music_volume * 100)
+            return self._music_volume * 100
 
     # 読み上げを取り消す。待っている側を起こすため、未再生の分にも完了を伝える
     def clear_clips(self):

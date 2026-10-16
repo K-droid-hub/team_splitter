@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from src.modules.music import Music
+from src.modules.music import Music, percent_to_scale, scale_to_percent
 from src.music_manager import MAX_QUEUE_SIZE, MusicManager, MusicState
 from src.music_source import Track
 from src.voice_session import USE_MUSIC
@@ -15,6 +15,21 @@ def make_cog():
 
 def track(title):
     return Track(title=title, webpage_url=f"https://example.com/{title}")
+
+
+# ---- 音量の目盛り ----
+
+def test_scale_100_is_half_of_full_volume():
+    assert scale_to_percent(100) == 50
+
+
+def test_scale_50_is_quarter_of_full_volume():
+    assert scale_to_percent(50) == 25
+
+
+def test_percent_maps_back_to_the_scale():
+    assert percent_to_scale(25) == 50
+    assert percent_to_scale(scale_to_percent(73)) == 73
 
 
 # ---- リピート ----
