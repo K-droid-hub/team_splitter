@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("GUILD_IDS", "0")  # modules.tts の import 時に GUILD_IDS を参照するため
 
 from src.modules.tts import Tts
-from src.tts_engine import VoicevoxEngine, sanitize_text
+from src.tts_engine import VOICE_VOLUME_SCALE, VoicevoxEngine, sanitize_text
 from src.tts_manager import SAMPLE_VOICE_TEXT, TtsManager, TtsState
 from src.voice_session import USE_TTS
 from src.user_voice_store import UserVoiceStore
@@ -301,8 +301,8 @@ def test_synthesize_speech_calls_query_then_synthesis():
         assert session.calls[0][1]["speaker"] == 5
         assert session.calls[1][0].endswith("/synthesis")
         assert session.calls[1][1]["speaker"] == 5
-        # synthesis には audio_query の結果 JSON を渡すこと
-        assert session.calls[1][2] == {"q": 1}
+        # synthesis には audio_query の結果 JSON を渡すこと。音量だけ上げて渡す
+        assert session.calls[1][2] == {"q": 1, "volumeScale": VOICE_VOLUME_SCALE}
 
     asyncio.run(scenario())
 
