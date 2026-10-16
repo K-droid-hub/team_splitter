@@ -122,6 +122,8 @@ class MixedAudioSource(discord.AudioSource):
         self._music = None
         self._music_done = None
         self._gain = 1.0
+        # ユーザーが指定した音楽の音量(0.0〜1.0)。読み上げによる自動の下げとは掛け合わせる
+        self._music_volume = 1.0
 
     def is_opus(self):
         return False
@@ -152,6 +154,15 @@ class MixedAudioSource(discord.AudioSource):
             stream, on_done = self._music, self._music_done
             self._music = self._music_done = None
         self._finish_music(stream, on_done)
+
+    # 音楽の音量を 0〜100 で設定する。範囲外は端に丸める
+    def set_music_volume(self, percent):
+        with self._lock:
+            self._music_volume = max(0, min(100, percent)) / 100
+
+    def music_volume(self):
+        with self._lock:
+            return round(self._music_volume * 100)
 
     # 読み上げを取り消す。待っている側を起こすため、未再生の分にも完了を伝える
     def clear_clips(self):
@@ -219,8 +230,9 @@ class MixedAudioSource(discord.AudioSource):
             self._gain = max(target, self._gain - GAIN_STEP)
         if music is None:
             return voice if voice is not None else SILENCE
-        if self._gain != 1.0:
-            music = audioop.mul(music, SAMPLE_WIDTH, self._gain)
+        level = self._gain * self._music_volume
+        if level != 1.0:
+            music = audioop.mul(music, SAMPLE_WIDTH, level)
         if voice is None:
             return music
         # 足し合わせて範囲を超えた分は audioop が頭打ちにしてくれる

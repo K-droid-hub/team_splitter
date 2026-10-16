@@ -23,6 +23,8 @@ class MusicState:
     added: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
     worker_task: asyncio.Task = None
     current: music_source.Track = None
+    # 今の曲をループするか。スキップ・停止で解除される
+    loop: bool = False
 
 
 class MusicManager:
@@ -70,7 +72,18 @@ class MusicManager:
     def skip(self, state):
         if state.current is None:
             return False
+        # 飛ばしたらループは解除する。解除しないと同じ曲へ戻ってしまう
+        state.loop = False
         state.session.skip_track()
+        return True
+
+    # 今の曲をもう一度、次に流れるようキューの先頭へ積む。
+    # 積めたら True。再生中の曲がない、または上限に達しているなら False
+    def repeat_next(self, state):
+        if state.current is None or len(state.queue) >= MAX_QUEUE_SIZE:
+            return False
+        state.queue.appendleft(state.current)
+        state.added.set()
         return True
 
     # 音楽を終了する。読み上げも使っていなければ、そこで接続も切れる
@@ -92,7 +105,7 @@ class MusicManager:
         if state.text_channel is None:
             return
         try:
-            await state.text_channel.send(text)
+            await state.text_channel.send(text, silent=True)
         except Exception as e:
             # 通知の失敗で再生を止めたくないので、ログだけ残して続行する
             print(f"⚠️ 音楽の通知送信に失敗: {e}")
@@ -118,6 +131,11 @@ class MusicManager:
             state.current = track
             try:
                 await self._play_one(state, track)
+                # ループ中は流し終えた曲をもう一度キューの先頭へ戻す。
+                # 失敗した曲は戻さないので、壊れた曲で無限に止まることはない
+                if state.loop and not self.repeat_next(state):
+                    state.loop = False
+                    await self._notify(state, "キューが上限のためループを終了しました。")
             except Exception as e:
                 # 1 曲の失敗で止めず、理由を伝えて次へ進む
                 print(f"❌ 音楽の再生に失敗: {e}")

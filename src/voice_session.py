@@ -80,6 +80,12 @@ class VoiceSession:
     def skip_track(self):
         self.mixer.stop_music()
 
+    def set_music_volume(self, percent):
+        self.mixer.set_music_volume(percent)
+
+    def music_volume(self):
+        return self.mixer.music_volume()
+
     def clear_clips(self):
         self.mixer.clear_clips()
 

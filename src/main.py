@@ -102,7 +102,7 @@ load_dotenv()
 bot = MyBot()
 @bot.command(name="hello") # 運営用 !hello コマンド
 async def show_command(ctx: commands.Context):
-    await ctx.send("HELLO")
+    await ctx.send("HELLO", silent=True)
 
 # 起動
 TOKEN = os.getenv('DISCORD_TOKEN')

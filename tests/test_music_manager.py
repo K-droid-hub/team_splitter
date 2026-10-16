@@ -58,7 +58,7 @@ class FakeTextChannel:
     def __init__(self):
         self.sent = []
 
-    async def send(self, content):
+    async def send(self, content, silent=False):
         self.sent.append(content)
 
 
@@ -189,6 +189,45 @@ def test_stop_releases_music_and_forgets_state():
     assert session.released == [USE_MUSIC]
     assert session.skips >= 1
     assert len(state.queue) == 0
+
+
+# ---- ループ ----
+
+class YieldingSession(FakeSession):
+    # 実際の再生と同じく、曲の途中で制御を返す(返さないとループが event loop を止めてしまう)
+    async def play_track(self, source):
+        await asyncio.sleep(0)
+        self.played.append(source)
+
+def test_loop_replays_the_track_until_turned_off():
+    async def scenario():
+        source = FakeSource()
+        session = YieldingSession()
+        manager = MusicManager(source=source)
+        with pcm_audio():
+            state = manager.start(session, FakeTextChannel())
+            state.loop = True
+            manager.enqueue(state, [track("a")])
+            await wait_for(lambda: len(session.played) == 3)
+            await manager.stop(state)
+        return source
+
+    source = asyncio.run(scenario())
+    assert source.resolved[:3] == ["a", "a", "a"]
+
+
+def test_skip_turns_the_loop_off():
+    async def scenario():
+        manager = MusicManager(source=FakeSource())
+        session = FakeSession(auto_finish=False)
+        state = manager.start(session, FakeTextChannel())
+        state.current = track("a")
+        state.loop = True
+        manager.skip(state)
+        await manager.stop(state)
+        return state
+
+    assert asyncio.run(scenario()).loop is False
 
 
 # ---- ワーカー ----

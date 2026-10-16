@@ -27,6 +27,8 @@ class TtsManager:
         # 読み上げ対象のテキストチャンネルごとの状態。同じサーバーでも
         # ボイスチャンネルが違えば、別々のチャンネルの発言を同時に読み上げられる
         self.states = {}
+        # 読み上げ対象のテキストチャンネルごとの入退室通知の設定。停止後も次回の開始で使う
+        self.join_leave_prefs = {}
         # 発言者 (user_id) ごとの話者 ID。永続化済みの設定を読み込んでおく
         self.user_speakers = self.store.load_all_speakers()
 
@@ -65,6 +67,7 @@ class TtsManager:
     # 読み上げを開始し、チャンネル用のワーカータスクを起動する。
     # session は呼び出し側が USE_TTS で確保済みのものを渡す
     def start_reading(self, text_channel_id, session, notify_join_leave):
+        self.join_leave_prefs[text_channel_id] = notify_join_leave
         state = TtsState(
             guild_id=session.guild_id,
             text_channel_id=text_channel_id,
@@ -73,6 +76,16 @@ class TtsManager:
         )
         state.worker_task = asyncio.create_task(self._run_worker(state))
         self.states[text_channel_id] = state
+
+    # パネルの入退室通知ボタン用。読み上げ中なら即反映し、次回の開始時も同じ設定を使う
+    def set_join_leave_notice(self, text_channel_id, enabled):
+        self.join_leave_prefs[text_channel_id] = enabled
+        state = self.states.get(text_channel_id)
+        if state is not None:
+            state.notify_join_leave = enabled
+
+    def join_leave_notice(self, text_channel_id):
+        return self.join_leave_prefs.get(text_channel_id, False)
 
     # 読み上げを終了する。音楽も使っていなければ、そこで接続も切れる
     async def stop_reading(self, text_channel_id):
