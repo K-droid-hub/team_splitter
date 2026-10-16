@@ -128,8 +128,22 @@ def make_manual_embed():
         value=(
             "**読み上げ声設定**: *今のあなたの声を確認し、別の声に変えます(🔊試聴で聴き比べ可)*\n"
             "**読み上げ開始 / 終了**: *パネルのボタンで読み上げを切り替えます*\n"
+            "**入退室通知**: *ON にすると入室・退室も読み上げます(チャンネルごとに保持)*\n"
             "**/読み上げ開始**: *入退室通知ありなど詳細指定で開始します*\n"
             "**/読み上げ終了**: *読み上げを終了します*"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="音楽(!コマンド・VC に入ってから使う)",
+        value=(
+            "**!play <URL または検索語>**: *VC に入って再生します(再生中ならキューに追加)*\n"
+            "**!skip**: *今の曲を飛ばして次へ進みます*\n"
+            "**!repeat**: *今の曲をもう一度、次に流します*\n"
+            "**!loop**: *今の曲を繰り返します(もう一度押すか !skip・!stop で解除)*\n"
+            "**!volume <0〜100>**: *音楽の音量を変えます(省略すると今の音量を表示)*\n"
+            "**!queue**: *再生中の曲と順番待ちを表示します*\n"
+            "**!stop**: *音楽を終了します*"
         ),
         inline=False,
     )
@@ -573,7 +587,7 @@ class AspirationModal(discord.ui.Modal, title="意気込みを入力"):
 
 # ---- 常駐パネル(永続 View) ----
 class PanelView(discord.ui.View):
-    def __init__(self, cog, is_reading=False):
+    def __init__(self, cog, is_reading=False, notice_on=False):
         super().__init__(timeout=None)
         self.cog = cog
         # 読み上げ状態に応じて 1 つのトグルボタンの見た目を切り替える
@@ -583,6 +597,11 @@ class PanelView(discord.ui.View):
         else:
             self.tts_toggle.label = "読み上げ開始"
             self.tts_toggle.style = discord.ButtonStyle.success
+        # 入退室通知は ON のときだけ緑にして、今の設定が一目で分かるようにする
+        self.notice_toggle.label = f"入退室通知: {'ON' if notice_on else 'OFF'}"
+        self.notice_toggle.style = (
+            discord.ButtonStyle.success if notice_on else discord.ButtonStyle.secondary
+        )
 
     @discord.ui.button(label="チーム数で分ける", style=discord.ButtonStyle.primary,
                        custom_id="panel:by_team", row=0)
@@ -646,6 +665,11 @@ class PanelView(discord.ui.View):
                        custom_id="panel:tts_toggle", row=3)
     async def tts_toggle(self, interaction, button):
         await self.cog.toggle_tts(interaction)
+
+    @discord.ui.button(label="入退室通知", style=discord.ButtonStyle.secondary,
+                       custom_id="panel:notice_toggle", row=3)
+    async def notice_toggle(self, interaction, button):
+        await self.cog.toggle_join_leave_notice(interaction)
 
     @discord.ui.button(label="説明書", style=discord.ButtonStyle.secondary,
                        custom_id="panel:manual", row=3)
@@ -740,9 +764,8 @@ class PanelCog(commands.Cog):
         async with lock:
             await self.delete_panel_message(channel)
             # ラベルはギルド全体ではなく、このチャンネルが読み上げ対象かで決める
-            is_reading = self.bot.tts_manager.is_target_channel(channel.guild.id, channel.id)
             message = await channel.send(
-                embed=make_panel_embed(), view=PanelView(self, is_reading)
+                embed=make_panel_embed(), view=self.build_view(channel), silent=True
             )
             self.panel_messages[channel.id] = message
             self.panel_store.set_panel(channel.guild.id, channel.id, message.id)
@@ -753,18 +776,14 @@ class PanelCog(commands.Cog):
         for channel_id, message in list(self.panel_messages.items()):
             if message.guild is None or message.guild.id != guild.id:
                 continue
-            # パネルごとに、そのチャンネルが読み上げ対象かでラベルを決める
-            is_reading = self.bot.tts_manager.is_target_channel(
-                guild.id, message.channel.id
-            )
             try:
-                await message.edit(view=PanelView(self, is_reading))
+                await message.edit(view=self.build_view(message.channel))
             except discord.HTTPException:
                 pass
 
     async def post_result(self, channel, embed):
         await self.repost_panel(channel)
-        await channel.send(embed=embed)
+        await channel.send(embed=embed, silent=True)
 
     # サブ View からの実行後、ephemeral を消して公開結果 + 貼り直し
     async def finish_sub(self, interaction, embed):
@@ -881,6 +900,22 @@ class PanelCog(commands.Cog):
         await interaction.response.send_message(embed=make_manual_embed(), ephemeral=True)
 
     # 読み上げ状態に応じて開始・終了を切り替える
+    # パネルは貼り直さず、押されたボタンの表示だけ差し替える
+    async def toggle_join_leave_notice(self, interaction):
+        manager = self.bot.tts_manager
+        enabled = not manager.join_leave_notice(interaction.channel_id)
+        manager.set_join_leave_notice(interaction.channel_id, enabled)
+        await interaction.response.edit_message(view=self.build_view(interaction.channel))
+
+    # ボタンの表示は、そのチャンネルの読み上げ状態と入退室通知の設定から決める
+    def build_view(self, channel):
+        manager = self.bot.tts_manager
+        return PanelView(
+            self,
+            is_reading=manager.is_target_channel(channel.guild.id, channel.id),
+            notice_on=manager.join_leave_notice(channel.id),
+        )
+
     async def toggle_tts(self, interaction):
         # このチャンネルが読み上げ対象のときだけ「終了」、それ以外は「開始」
         if self.bot.tts_manager.is_target_channel(
@@ -900,8 +935,12 @@ class PanelCog(commands.Cog):
         await interaction.response.defer()
         # 別のボイスチャンネルなら、他のテキストチャンネルが読み上げ中でも並行して始められる。
         # 断る条件(同じボイスチャンネルで読み上げ中・空き不足)は /読み上げ開始 と共通
+        # 入退室通知は、パネルのボタンで設定したチャンネルごとの値をそのまま使う
         error = await begin_reading(
-            self.bot, interaction.channel_id, interaction.user.voice.channel, False
+            self.bot,
+            interaction.channel_id,
+            interaction.user.voice.channel,
+            self.bot.tts_manager.join_leave_notice(interaction.channel_id),
         )
         if error is not None:
             await interaction.followup.send(error, ephemeral=True)

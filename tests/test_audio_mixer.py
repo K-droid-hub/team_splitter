@@ -186,6 +186,33 @@ def test_music_volume_recovers_after_voice():
     assert peaks[-1] == 10000
 
 
+def test_music_volume_scales_the_track():
+    mixer = MixedAudioSource()
+    mixer.set_music_volume(50)
+    mixer.set_music(FakeStream([frame(10000)], eof=False), Recorder())
+    assert peak(mixer.read()) == 5000
+    assert mixer.music_volume() == 50
+
+
+def test_music_volume_is_clamped_to_0_100():
+    mixer = MixedAudioSource()
+    mixer.set_music_volume(250)
+    assert mixer.music_volume() == 100
+    mixer.set_music_volume(-5)
+    assert mixer.music_volume() == 0
+
+
+def test_music_volume_stacks_with_ducking():
+    mixer = MixedAudioSource()
+    mixer.set_music_volume(50)
+    mixer.set_music(FakeStream([frame(10000)] * 30, eof=False), Recorder())
+    mixer.add_clip(frame(0) * 20, Recorder())
+    for _ in range(12):
+        mixer.read()
+    # 読み上げ中は自動の下げと指定の音量を掛けた分だけ小さくなる
+    assert peak(mixer.read()) == int(10000 * DUCKING_GAIN * 0.5)
+
+
 def test_mixed_signal_is_clipped_instead_of_wrapping():
     # 足して範囲を超えたとき、符号が反転して爆音にならず頭打ちになること
     mixer = MixedAudioSource()

@@ -2,62 +2,45 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from src.modules.music import Music, load_allowed_user_ids
+from src.modules.music import Music
 from src.music_manager import MAX_QUEUE_SIZE, MusicManager, MusicState
 from src.music_source import Track
 from src.voice_session import USE_MUSIC
 
 
-def make_cog(allowed="111,222"):
+def make_cog():
     bot = SimpleNamespace(music_manager=Mock(), voice_pool=Mock())
-    cog = Music(bot)
-    # .env 由来の許可リストはテスト側で差し替える
-    cog.allowed_user_ids = load_allowed_user_ids(allowed)
-    return cog
+    return Music(bot)
 
 
 def track(title):
     return Track(title=title, webpage_url=f"https://example.com/{title}")
 
 
-# ---- 許可リストの読み込み ----
+# ---- リピート ----
 
-def test_parses_comma_separated_ids():
-    assert load_allowed_user_ids("111,222") == {111, 222}
-
-
-def test_ignores_blanks_and_spaces():
-    assert load_allowed_user_ids(" 111 , ,222,") == {111, 222}
-
-
-def test_ignores_non_numeric_values():
-    # 設定ミスで全体が壊れないよう、読めない値だけ捨てる
-    assert load_allowed_user_ids("111,abc,222") == {111, 222}
+def test_repeat_puts_current_track_next_in_the_queue():
+    manager = MusicManager(source=Mock())
+    state = add_state(manager, 10)
+    state.current = track("a")
+    state.queue.append(track("b"))
+    assert manager.repeat_next(state) is True
+    assert [t.title for t in state.queue] == ["a", "b"]
 
 
-def test_empty_setting_allows_nobody():
-    # 未設定を「全員許可」に倒すと事故るので、空集合にする
-    assert load_allowed_user_ids("") == set()
+def test_repeat_does_nothing_when_nothing_is_playing():
+    manager = MusicManager(source=Mock())
+    state = add_state(manager, 10)
+    assert manager.repeat_next(state) is False
+    assert len(state.queue) == 0
 
 
-# ---- コマンドの可否 ----
-
-def test_allowed_user_passes_the_check():
-    cog = make_cog()
-    ctx = SimpleNamespace(author=SimpleNamespace(id=111))
-    assert asyncio.run(cog.cog_check(ctx)) is True
-
-
-def test_other_user_is_rejected():
-    cog = make_cog()
-    ctx = SimpleNamespace(author=SimpleNamespace(id=999))
-    assert asyncio.run(cog.cog_check(ctx)) is False
-
-
-def test_nobody_passes_when_setting_is_empty():
-    cog = make_cog(allowed="")
-    ctx = SimpleNamespace(author=SimpleNamespace(id=111))
-    assert asyncio.run(cog.cog_check(ctx)) is False
+def test_repeat_refused_when_queue_is_full():
+    manager = MusicManager(source=Mock())
+    state = add_state(manager, 10)
+    state.current = track("a")
+    state.queue.extend(track(str(i)) for i in range(MAX_QUEUE_SIZE))
+    assert manager.repeat_next(state) is False
 
 
 # ---- 追加結果の文面 ----
@@ -134,27 +117,28 @@ def test_targets_the_channel_the_user_is_in():
     assert cog._target_state(make_ctx(voice_channel_id=11)) == (mine, None)
 
 
-def test_falls_back_to_the_only_playback_in_the_server():
-    # ボイスチャンネル外からでも、1 か所しか流していなければそこを操作できる
-    cog, manager = make_routing_cog()
-    only = add_state(manager, 10)
-    assert cog._target_state(make_ctx()) == (only, None)
-
-
-def test_asks_to_join_when_two_channels_are_playing():
+def test_outside_voice_cannot_control_playback():
+    # VC に入っていない人は、サーバーに再生が 1 か所しかなくても操作できない
     cog, manager = make_routing_cog()
     add_state(manager, 10)
-    add_state(manager, 11)
     state, error = cog._target_state(make_ctx())
     assert state is None
     assert "入ってから" in error
 
 
-def test_reports_when_nothing_is_playing():
+def test_cannot_control_another_channels_playback():
+    cog, manager = make_routing_cog()
+    add_state(manager, 10)
+    state, error = cog._target_state(make_ctx(voice_channel_id=11))
+    assert state is None
+    assert "再生していません" in error
+
+
+def test_reports_when_nothing_is_playing_here():
     cog, _ = make_routing_cog()
     state, error = cog._target_state(make_ctx(voice_channel_id=10))
     assert state is None
-    assert error == "再生していません。"
+    assert error == "このボイスチャンネルでは再生していません。"
 
 
 def test_queue_message_lists_current_and_upcoming():

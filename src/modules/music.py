@@ -1,5 +1,3 @@
-import os
-
 from discord.ext import commands
 
 from src import music_source
@@ -9,50 +7,23 @@ from src.voice_session import USE_MUSIC
 
 # !queue で一度に並べる最大件数。長すぎるとメッセージ上限に当たる
 QUEUE_PREVIEW_LIMIT = 10
-
-
-# 許可ユーザーは .env で与える。カンマ区切りの数値以外は無視してログに残す
-def load_allowed_user_ids(raw=None):
-    raw = os.getenv("MUSIC_ALLOWED_USER_IDS", "") if raw is None else raw
-    user_ids = set()
-    for part in raw.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            user_ids.add(int(part))
-        except ValueError:
-            print(f"⚠️ MUSIC_ALLOWED_USER_IDS に数値でない値があります: {part}")
-    return user_ids
+# !volume で指定できる上限。これ以上は音割れしやすいので頭打ちにする
+MAX_MUSIC_VOLUME = 100
 
 
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.music_manager = bot.music_manager
-        self.allowed_user_ids = load_allowed_user_ids()
-        # 未設定を「全員許可」にすると事故るので、誰も使えない側に倒す
-        if not self.allowed_user_ids:
-            print("⚠️ MUSIC_ALLOWED_USER_IDS が未設定のため !play は誰も使えません")
-
-    # 隠しコマンドなので、許可外の相手には存在を悟られないよう黙って無視する
-    async def cog_check(self, ctx):
-        return ctx.author.id in self.allowed_user_ids
-
-    async def cog_command_error(self, ctx, error):
-        if isinstance(error, commands.CheckFailure):
-            print(f"⚠️ 未許可ユーザーの !{ctx.command} を無視しました: {ctx.author.id}")
-            return
-        print(f"❌ !{ctx.command} でエラー: {error}")
 
     @commands.command(name="play", hidden=True)
     @commands.guild_only()
     async def play(self, ctx, *, query: str = None):
         if query is None:
-            await ctx.send("`!play <URL または検索語>` の形で指定してください。")
+            await ctx.send("`!play <URL または検索語>` の形で指定してください。", silent=True)
             return
         if ctx.author.voice is None:
-            await ctx.send("ボイスチャンネルに入ってから実行してください。")
+            await ctx.send("ボイスチャンネルに入ってから実行してください。", silent=True)
             return
         voice_channel = ctx.author.voice.channel
         # yt-dlp の解決は数秒かかるので、入力中表示で待たせていることを示す
@@ -63,10 +34,10 @@ class Music(commands.Cog):
                 )
             except Exception as e:
                 print(f"❌ 音源の解決に失敗: {e}")
-                await ctx.send("音源を取得できませんでした。URL を確認してください。")
+                await ctx.send("音源を取得できませんでした。URL を確認してください。", silent=True)
                 return
         if not tracks:
-            await ctx.send("再生できるものが見つかりませんでした。")
+            await ctx.send("再生できるものが見つかりませんでした。", silent=True)
             return
         # そのチャンネルで既に流していれば積むだけ。接続の割り当ては初回だけ行う
         state = self.music_manager.state_for_voice(voice_channel.id)
@@ -74,18 +45,18 @@ class Music(commands.Cog):
             try:
                 session = await self.bot.voice_pool.acquire(voice_channel, USE_MUSIC)
             except VoiceSlotUnavailable as e:
-                await ctx.send(str(e))
+                await ctx.send(str(e), silent=True)
                 return
             except Exception as e:
                 print(f"❌ VC 接続に失敗: {e}")
-                await ctx.send("ボイスチャンネルへの接続に失敗しました。")
+                await ctx.send("ボイスチャンネルへの接続に失敗しました。", silent=True)
                 return
             # 接続を待つ間に、同じチャンネルで別の !play が先に始めていればそちらへ積む
             state = self.music_manager.state_for_session(session)
             if state is None:
                 state = self.music_manager.start(session, ctx.channel)
         added = self.music_manager.enqueue(state, tracks)
-        await ctx.send(self._build_added_message(tracks, added))
+        await ctx.send(self._build_added_message(tracks, added), silent=True)
 
     def _build_added_message(self, tracks, added):
         if added == 0:
@@ -99,52 +70,102 @@ class Music(commands.Cog):
             message += f"\n(上限のため {len(tracks) - added} 件は追加できませんでした)"
         return message
 
-    # 操作対象の再生を決める。実行者のいるチャンネルを優先し、
-    # サーバーで 1 か所しか流していなければそこを対象にする
+    # 操作対象の再生は、実行者がいるボイスチャンネルのものに限る。
+    # 誰でも操作できる代わりに、VC に入っていない人からの操作は弾く
     def _target_state(self, ctx):
         voice = ctx.author.voice
-        if voice is not None:
-            state = self.music_manager.state_for_voice(voice.channel.id)
-            if state is not None:
-                return state, None
-        states = self.music_manager.states_in_guild(ctx.guild.id)
-        if not states:
-            return None, "再生していません。"
-        if len(states) > 1:
-            return None, "操作したい再生中のボイスチャンネルに入ってから実行してください。"
-        return states[0], None
+        if voice is None:
+            return None, "ボイスチャンネルに入ってから実行してください。"
+        state = self.music_manager.state_for_voice(voice.channel.id)
+        if state is None:
+            return None, "このボイスチャンネルでは再生していません。"
+        return state, None
 
     @commands.command(name="skip", hidden=True)
     @commands.guild_only()
     async def skip(self, ctx):
         state, error = self._target_state(ctx)
         if state is None:
-            await ctx.send(error)
+            await ctx.send(error, silent=True)
             return
         track = state.current
         if not self.music_manager.skip(state):
-            await ctx.send("再生中の曲はありません。")
+            await ctx.send("再生中の曲はありません。", silent=True)
             return
-        await ctx.send(f"⏭️ スキップしました: {track.title}")
+        await ctx.send(f"⏭️ スキップしました: {track.title}", silent=True)
 
     @commands.command(name="stop", hidden=True)
     @commands.guild_only()
     async def stop(self, ctx):
         state, error = self._target_state(ctx)
         if state is None:
-            await ctx.send(error)
+            await ctx.send(error, silent=True)
             return
         await self.music_manager.stop(state)
-        await ctx.send("⏹️ 音楽を終了しました。")
+        await ctx.send("⏹️ 音楽を終了しました。", silent=True)
+
+    # 音量は 0〜100 の整数。省略すると今の音量を返す
+    @commands.command(name="volume", hidden=True)
+    @commands.guild_only()
+    async def volume(self, ctx, value: str = None):
+        state, error = self._target_state(ctx)
+        if state is None:
+            await ctx.send(error, silent=True)
+            return
+        if value is None:
+            await ctx.send(f"🔈 現在の音量: {state.session.music_volume()}%", silent=True)
+            return
+        try:
+            percent = int(value)
+        except ValueError:
+            percent = None
+        if percent is None or not 0 <= percent <= MAX_MUSIC_VOLUME:
+            await ctx.send(f"`!volume <0〜{MAX_MUSIC_VOLUME}>` の形で指定してください。", silent=True)
+            return
+        state.session.set_music_volume(percent)
+        await ctx.send(f"🔊 音楽の音量を {percent}% にしました。", silent=True)
+
+    # 今の曲を次にもう一度流す。キューの先頭へ積むだけなので、順番待ちの曲より先に鳴る
+    @commands.command(name="repeat", hidden=True)
+    @commands.guild_only()
+    async def repeat(self, ctx):
+        state, error = self._target_state(ctx)
+        if state is None:
+            await ctx.send(error, silent=True)
+            return
+        if state.current is None:
+            await ctx.send("再生中の曲はありません。", silent=True)
+            return
+        if not self.music_manager.repeat_next(state):
+            await ctx.send(f"キューが上限 ({MAX_QUEUE_SIZE} 件) に達しているため追加できませんでした。", silent=True)
+            return
+        await ctx.send(f"🔁 次にもう一度再生します: {state.current.title}", silent=True)
+
+    # 今の曲をループする。もう一度押すか、!skip・!stop で解除される
+    @commands.command(name="loop", hidden=True)
+    @commands.guild_only()
+    async def loop(self, ctx):
+        state, error = self._target_state(ctx)
+        if state is None:
+            await ctx.send(error, silent=True)
+            return
+        if state.current is None:
+            await ctx.send("再生中の曲はありません。", silent=True)
+            return
+        state.loop = not state.loop
+        if state.loop:
+            await ctx.send(f"🔁 ループを開始しました: {state.current.title}", silent=True)
+        else:
+            await ctx.send("ループを解除しました。", silent=True)
 
     @commands.command(name="queue", hidden=True)
     @commands.guild_only()
     async def queue(self, ctx):
         state, error = self._target_state(ctx)
         if state is None:
-            await ctx.send(error)
+            await ctx.send(error, silent=True)
             return
-        await ctx.send(self._build_queue_message(state))
+        await ctx.send(self._build_queue_message(state), silent=True)
 
     def _build_queue_message(self, state):
         lines = []

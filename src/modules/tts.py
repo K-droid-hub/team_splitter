@@ -108,7 +108,7 @@ class Tts(commands.Cog):
             value="このチャンネルの発言を読み上げます。",
             inline=False,
         )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, silent=True)
 
     @app_commands.command(name="読み上げ終了")
     @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])

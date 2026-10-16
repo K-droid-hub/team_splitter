@@ -512,3 +512,12 @@ def test_stop_has_no_target_outside_any_reading():
     cog, _, _ = make_voice_cog([make_state(text_channel_id=100, voice_channel_id=10)])
     assert cog._reading_target(make_stop_interaction(999)) is None
 
+
+
+def test_join_leave_notice_defaults_off_and_can_be_switched():
+    manager = TtsManager(engine=Mock(), store=Mock())
+    assert manager.join_leave_notice(5) is False
+    manager.set_join_leave_notice(5, True)
+    assert manager.join_leave_notice(5) is True
+    # 他のチャンネルの設定には影響しない
+    assert manager.join_leave_notice(6) is False

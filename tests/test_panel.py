@@ -296,6 +296,7 @@ def test_start_tts_runs_alongside_reading_in_another_voice_channel():
         cog = make_cog()
         cog.bot.tts_manager.is_reading = Mock(return_value=True)
         cog.bot.tts_manager.state_for_voice = Mock(return_value=None)
+        cog.bot.tts_manager.join_leave_notice = Mock(return_value=False)
         session = Mock()
         cog.bot.voice_pool.acquire = AsyncMock(return_value=session)
         cog.repost_panel = AsyncMock()
