@@ -11,6 +11,8 @@ CUSTOM_EMOJI_PATTERN = re.compile(r"<a?:\w+:\d+>")
 MENTION_PATTERN = re.compile(r"<@[!&]?\d+>|<#\d+>")
 # 読み上げの音量。VOICEVOX の volumeScale に渡す(既定は 1.0)。音楽より小さく聞こえるため上げている
 VOICE_VOLUME_SCALE = 2.0
+# 発話の前後に入る無音(秒)。VOICEVOX の既定は各 0.1 秒で、言い始めが遅く聞こえるため詰めている
+PHONEME_PADDING = 0.02
 
 
 def sanitize_text(text):
@@ -51,6 +53,8 @@ class VoicevoxEngine:
                 query_res.raise_for_status()
                 query = await query_res.json()
             query["volumeScale"] = VOICE_VOLUME_SCALE
+            query["prePhonemeLength"] = PHONEME_PADDING
+            query["postPhonemeLength"] = PHONEME_PADDING
             async with session.post(
                 f"{self.base_url}/synthesis",
                 params={"speaker": speaker},
