@@ -8,6 +8,8 @@ from src.voice_session import USE_TTS, VoiceSession
 
 # 声設定 UI の試聴で読み上げる固定サンプル文
 SAMPLE_VOICE_TEXT = "こんにちは、この声で読み上げます"
+# 再生中に先読みで合成しておく発言の数
+SYNTH_AHEAD = 2
 
 
 @dataclasses.dataclass
@@ -135,16 +137,33 @@ class TtsManager:
             return
         state.queue.put_nowait((text, speaker))
 
+    # 合成と再生を別タスクに分け、次の発言の合成を今の発言の再生中に進めておく。
+    # 合成待ちで 1 件ずつ止まらないよう、先読みは SYNTH_AHEAD 件までに抑える
     async def _run_worker(self, state):
+        ready = asyncio.Queue(maxsize=SYNTH_AHEAD)
+        synth_task = asyncio.create_task(self._synthesize_loop(state, ready))
+        try:
+            while True:
+                synthesis = await ready.get()
+                try:
+                    wav = await synthesis
+                    await state.session.play_clip(wav_to_pcm(wav))
+                except Exception as e:
+                    # エラーは握りつぶさずログに残し、次の発言へ進む
+                    print(f"❌ TTS playback failed: {e}")
+                finally:
+                    # 完了は再生が終わった時点で数える。join() を再生完了の待ち合わせに使うため
+                    state.queue.task_done()
+        finally:
+            synth_task.cancel()
+            # 再生されずに止まった分の合成も取り消す
+            while not ready.empty():
+                ready.get_nowait().cancel()
+
+    async def _synthesize_loop(self, state, ready):
         while True:
             text, speaker = await state.queue.get()
-            try:
-                await self._play_one(state, text, speaker)
-            except Exception as e:
-                # エラーは握りつぶさずログに残し、次の発言へ進む
-                print(f"❌ TTS playback failed: {e}")
-            finally:
-                state.queue.task_done()
+            await ready.put(asyncio.create_task(self.engine.synthesize_speech(text, speaker)))
 
     # 1 件分の音声を合成してミキサーへ流し、鳴り終わるまで待つ。
     # 音楽と同じ接続で重ねて鳴らすため、ffmpeg を通さず PCM にそろえて渡す

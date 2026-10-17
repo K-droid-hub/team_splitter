@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("GUILD_IDS", "0")  # modules.tts の import 時に GUILD_IDS を参照するため
 
 from src.modules.tts import Tts
-from src.tts_engine import VOICE_VOLUME_SCALE, VoicevoxEngine, sanitize_text
+from src.tts_engine import PHONEME_PADDING, VOICE_VOLUME_SCALE, VoicevoxEngine, sanitize_text
 from src.tts_manager import SAMPLE_VOICE_TEXT, TtsManager, TtsState
 from src.voice_session import USE_TTS
 from src.user_voice_store import UserVoiceStore
@@ -305,8 +305,13 @@ def test_synthesize_speech_calls_query_then_synthesis():
         assert session.calls[0][1]["speaker"] == 5
         assert session.calls[1][0].endswith("/synthesis")
         assert session.calls[1][1]["speaker"] == 5
-        # synthesis には audio_query の結果 JSON を渡すこと。音量だけ上げて渡す
-        assert session.calls[1][2] == {"q": 1, "volumeScale": VOICE_VOLUME_SCALE}
+        # synthesis には audio_query の結果 JSON を渡すこと。音量と前後の無音を詰めて渡す
+        assert session.calls[1][2] == {
+            "q": 1,
+            "volumeScale": VOICE_VOLUME_SCALE,
+            "prePhonemeLength": PHONEME_PADDING,
+            "postPhonemeLength": PHONEME_PADDING,
+        }
 
     asyncio.run(scenario())
 
@@ -558,3 +563,36 @@ def test_joining_member_speaker_is_warmed_on_reading_channel():
 
     asyncio.run(scenario())
     assert manager.engine.warmed == [81]
+
+
+def test_worker_synthesizes_next_message_while_current_one_plays():
+    # 1 件目の再生が終わるまで待たされても、2 件目の合成は先に始まっていること
+    class BlockingSession(FakeVoiceSession):
+        def __init__(self):
+            super().__init__()
+            self.release_first = None
+
+        async def play_clip(self, pcm):
+            self.clips.append(pcm)
+            if len(self.clips) == 1:
+                await self.release_first.wait()
+
+    async def scenario():
+        engine = WavEngine()
+        mgr = TtsManager(engine=engine, store=make_store())
+        session = BlockingSession()
+        session.release_first = asyncio.Event()
+        mgr.start_reading(100, session, notify_join_leave=False)
+        mgr.enqueue_notice(100, "一つ目")
+        mgr.enqueue_notice(100, "二つ目")
+        for _ in range(10):
+            await asyncio.sleep(0)
+        synthesized_while_playing = [call[0] for call in engine.calls]
+        session.release_first.set()
+        await asyncio.wait_for(mgr.states[100].queue.join(), 1)
+        await mgr.stop_reading(100)
+        return synthesized_while_playing, session
+
+    synthesized, session = asyncio.run(scenario())
+    assert synthesized == ["一つ目", "二つ目"]
+    assert len(session.clips) == 2
