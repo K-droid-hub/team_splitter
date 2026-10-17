@@ -61,14 +61,6 @@ class MyBot(commands.Bot):
     async def setup_hook(self):
         # モジュールのロード
         modules = [
-            'src.modules.by_team',
-            'src.modules.by_member',
-            'src.modules.by_ramdom',
-            'src.modules.add_viewer',
-            'src.modules.delete_viewer',
-            'src.modules.add_priority',
-            'src.modules.delete_priority',
-            'src.modules.show_all',
             'src.modules.reset_all',
             'src.modules.tts',
             'src.modules.panel',

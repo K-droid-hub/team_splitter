@@ -30,6 +30,16 @@ class VoicevoxEngine:
         self.base_url = (base_url or os.getenv("VOICEVOX_URL", "http://localhost:50021")).rstrip("/")
         self.default_speaker = int(default_speaker or os.getenv("VOICEVOX_SPEAKER", "3"))
 
+    # 話者のモデルを先に読み込んでおく。初回の合成が遅くなるのを避けるため VC 参加時に呼ぶ。
+    # skip_reinit で読み込み済みなら何もしない
+    async def initialize_speaker(self, speaker):
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{self.base_url}/initialize_speaker",
+                params={"speaker": speaker, "skip_reinit": "true"},
+            ) as res:
+                res.raise_for_status()
+
     # VOICEVOX の 2 段 API (audio_query -> synthesis) で wav バイト列を生成する
     async def synthesize_speech(self, text, speaker=None):
         speaker = self.default_speaker if speaker is None else speaker

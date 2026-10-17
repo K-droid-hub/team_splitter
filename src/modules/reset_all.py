@@ -1,24 +1,20 @@
-import discord, os
+import discord
 from discord.ext import commands
-from discord import app_commands
 
 class ResetAll(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.split_team = bot.split_team # メインのインスタンスを共有
-    
-    guild_ids_raw = os.getenv("GUILD_IDS", "")
-    GUILD_IDS = [int(gid.strip()) for gid in guild_ids_raw.split(",") if gid]
 
-    @app_commands.command(name="リセット")
-    @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
-
-    async def reset_command(self, interaction: discord.Interaction):
+    # 裏コマンド。スラッシュコマンドの一覧には出さない
+    @commands.command(name="reset", hidden=True)
+    @commands.guild_only()
+    async def reset_command(self, ctx):
         # 実行したサーバーの登録だけ解除する(他サーバーへ波及させない)
-        self.split_team.reset_all(interaction)
-        embed = discord.Embed(color=discord.Color.black())
+        self.split_team.reset_all(ctx)
+        embed = discord.Embed(color=discord.Color.darker_grey())
         embed.add_field(name="リセット", value="ALL RESET DONE", inline=False)
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed, silent=True)
 
 # Cog 登録
 async def setup(bot: commands.Bot):
