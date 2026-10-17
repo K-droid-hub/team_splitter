@@ -9,8 +9,8 @@ from src.voice_session import USE_MUSIC
 QUEUE_PREVIEW_LIMIT = 10
 # !volume で指定する目盛りの範囲(1〜100)。細かく選べるよう 100 段階にしている
 MAX_MUSIC_VOLUME = 100
-# 目盛り 100 が当たる実際の音量(%)。音楽は大きくなりがちなので、読み上げが埋もれないよう半分に抑える
-MUSIC_VOLUME_CEILING = 50
+# 目盛り 100 が当たる実際の音量(%)。音楽は大きくなりがちなので、読み上げが埋もれないよう抑える(従来の 50% の 3/4)
+MUSIC_VOLUME_CEILING = 37.5
 
 
 # 目盛り → 実際の音量(%)

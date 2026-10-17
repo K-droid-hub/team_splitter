@@ -19,16 +19,16 @@ def track(title):
 
 # ---- 音量の目盛り ----
 
-def test_scale_100_is_half_of_full_volume():
-    assert scale_to_percent(100) == 50
+def test_scale_100_is_three_eighths_of_full_volume():
+    assert scale_to_percent(100) == 37.5
 
 
-def test_scale_50_is_quarter_of_full_volume():
-    assert scale_to_percent(50) == 25
+def test_scale_50_is_three_sixteenths_of_full_volume():
+    assert scale_to_percent(50) == 18.75
 
 
 def test_percent_maps_back_to_the_scale():
-    assert percent_to_scale(25) == 50
+    assert percent_to_scale(25) == 67
     assert percent_to_scale(scale_to_percent(73)) == 73
 
 

@@ -31,6 +31,8 @@ class TtsManager:
         self.join_leave_prefs = {}
         # 発言者 (user_id) ごとの話者 ID。永続化済みの設定を読み込んでおく
         self.user_speakers = self.store.load_all_speakers()
+        # 話者の読み込みを裏で走らせるタスク。参照を持っておかないと途中で回収されてしまう
+        self._warm_tasks = set()
 
     def is_reading(self, guild_id):
         return any(state.guild_id == guild_id for state in self.states.values())
@@ -63,6 +65,20 @@ class TtsManager:
     # VC 接続を伴わないので読み上げ中でなくても呼べる
     async def synthesize_sample(self, speaker):
         return await self.engine.synthesize_speech(SAMPLE_VOICE_TEXT, speaker)
+
+    # 話者のモデルを VOICEVOX に裏で読み込ませる。VC 参加や読み上げ開始の応答を待たせないよう
+    # タスクにする。失敗しても読み上げは通常どおり動くので、ログだけ残す
+    def warm_speakers(self, speaker_ids):
+        for speaker_id in set(speaker_ids):
+            task = asyncio.create_task(self._warm_speaker(speaker_id))
+            self._warm_tasks.add(task)
+            task.add_done_callback(self._warm_tasks.discard)
+
+    async def _warm_speaker(self, speaker_id):
+        try:
+            await self.engine.initialize_speaker(speaker_id)
+        except Exception as e:
+            print(f"❌ 話者の読み込みに失敗: {e}")
 
     # 読み上げを開始し、チャンネル用のワーカータスクを起動する。
     # session は呼び出し側が USE_TTS で確保済みのものを渡す

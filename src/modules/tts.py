@@ -1,8 +1,6 @@
 import dataclasses
-import os
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 from src.voice_pool import VoiceSlotUnavailable
@@ -31,11 +29,6 @@ SPEAKERS = [
     Speaker(89, "Voidoll", "無機質で機械的な声"),
 ]
 
-# スラッシュコマンドの選択肢は一覧から生成し、パネルと順番・表示名を揃える
-SPEAKER_CHOICES = [
-    app_commands.Choice(name=speaker.name, value=speaker.id) for speaker in SPEAKERS
-]
-
 _SPEAKERS_BY_ID = {speaker.id: speaker for speaker in SPEAKERS}
 
 
@@ -52,6 +45,11 @@ async def begin_reading(bot, text_channel_id, voice_channel, notify_join_leave):
     other = manager.state_for_voice(voice_channel.id)
     if other is not None:
         return f"このボイスチャンネルでは <#{other.text_channel_id}> の発言を読み上げ中です。"
+    # 接続を待つ間に、いまVCにいる人の話者も含めて読み込んでおく。初回の発言を遅らせないため
+    manager.warm_speakers(
+        [manager.engine.default_speaker]
+        + [manager.get_speaker(m.id) for m in voice_channel.members if not m.bot]
+    )
     try:
         session = await bot.voice_pool.acquire(voice_channel, USE_TTS)
     except VoiceSlotUnavailable as e:
@@ -76,83 +74,6 @@ class Tts(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.tts_manager = bot.tts_manager # メインのインスタンスを共有
-
-    guild_ids_raw = os.getenv("GUILD_IDS", "")
-    GUILD_IDS = [int(gid.strip()) for gid in guild_ids_raw.split(",") if gid]
-
-    @app_commands.command(name="読み上げ開始")
-    @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
-    @app_commands.describe(入退室通知="入退室を読み上げるか (default: しない)")
-    async def start_reading(self, interaction: discord.Interaction, 入退室通知: bool = False):
-        if interaction.user.voice is None:
-            await interaction.response.send_message(
-                "ボイスチャンネルに入ってから実行してください。", ephemeral=True
-            )
-            return
-        if self.tts_manager.is_target_channel(interaction.guild_id, interaction.channel_id):
-            await interaction.response.send_message(
-                "すでにこのチャンネルで読み上げ中です。", ephemeral=True
-            )
-            return
-        # VC 接続に時間がかかっても 3 秒制限で落ちないよう応答を保留する
-        await interaction.response.defer()
-        error = await begin_reading(
-            self.bot, interaction.channel_id, interaction.user.voice.channel, 入退室通知
-        )
-        if error is not None:
-            await interaction.followup.send(error, ephemeral=True)
-            return
-        embed = discord.Embed(color=discord.Color.green())
-        embed.add_field(
-            name="読み上げ開始",
-            value="このチャンネルの発言を読み上げます。",
-            inline=False,
-        )
-        await interaction.followup.send(embed=embed, silent=True)
-
-    @app_commands.command(name="読み上げ終了")
-    @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
-    async def stop_reading(self, interaction: discord.Interaction):
-        text_channel_id = self._reading_target(interaction)
-        if text_channel_id is None:
-            await interaction.response.send_message(
-                "読み上げは開始されていません。", ephemeral=True
-            )
-            return
-        await self.tts_manager.stop_reading(text_channel_id)
-        embed = discord.Embed(color=discord.Color.green())
-        embed.add_field(name="読み上げ終了", value="読み上げを終了しました。", inline=False)
-        await interaction.response.send_message(embed=embed)
-
-    @app_commands.command(name="読み上げ声設定")
-    @app_commands.guilds(*[discord.Object(id=guild_id) for guild_id in GUILD_IDS])
-    @app_commands.describe(話者="あなたの発言を読み上げる声")
-    @app_commands.choices(話者=SPEAKER_CHOICES)
-    async def set_voice(self, interaction: discord.Interaction, 話者: app_commands.Choice[int]):
-        self.tts_manager.set_speaker(
-            interaction.user.id, 話者.value, interaction.user.display_name
-        )
-        # 名前だけでは声質が分からない話者があるので、確認にも説明を添える
-        speaker = find_speaker(話者.value)
-        detail = f"({speaker.description})" if speaker is not None else ""
-        embed = discord.Embed(color=discord.Color.green())
-        embed.add_field(
-            name="読み上げ声設定",
-            value=f"あなたの声を「{話者.name}」{detail}に設定しました。",
-            inline=False,
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    # 終了する読み上げを決める。このチャンネルが読み上げ対象ならそれを、
-    # そうでなければ実行者のいるボイスチャンネルの読み上げを対象にする
-    def _reading_target(self, interaction):
-        if self.tts_manager.is_target_channel(interaction.guild_id, interaction.channel_id):
-            return interaction.channel_id
-        voice = interaction.user.voice
-        if voice is None:
-            return None
-        state = self.tts_manager.state_for_voice(voice.channel.id)
-        return None if state is None else state.text_channel_id
 
     def _is_command(self, content):
         prefix = self.bot.command_prefix
@@ -195,10 +116,13 @@ class Tts(commands.Cog):
         # 読み上げはボイスチャンネルごとなので、入った先・出た元それぞれで通知する
         if after_id is not None:
             state = self.tts_manager.state_for_voice(after_id)
-            if state is not None and state.notify_join_leave:
-                self.tts_manager.enqueue_notice(
-                    state.text_channel_id, f"{member.display_name} が入室しました"
-                )
+            if state is not None:
+                # 途中から入ってきた人の話者も、最初の発言の前に読み込んでおく
+                self.tts_manager.warm_speakers([self.tts_manager.get_speaker(member.id)])
+                if state.notify_join_leave:
+                    self.tts_manager.enqueue_notice(
+                        state.text_channel_id, f"{member.display_name} が入室しました"
+                    )
         if before_id is None:
             return
         state = self.tts_manager.state_for_voice(before_id)

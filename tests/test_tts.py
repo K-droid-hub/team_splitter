@@ -21,10 +21,14 @@ class FakeEngine:
     def __init__(self, default_speaker=3):
         self.default_speaker = default_speaker
         self.calls = []
+        self.warmed = []
 
     async def synthesize_speech(self, text, speaker=None):
         self.calls.append((text, speaker))
         return b"wav"
+
+    async def initialize_speaker(self, speaker):
+        self.warmed.append(speaker)
 
 
 # ---- sanitize_text ----
@@ -370,7 +374,7 @@ def make_begin_bot(existing=None, acquire=None):
 def test_begin_reading_starts_on_the_acquired_session():
     async def scenario():
         bot = make_begin_bot()
-        error = await begin_reading(bot, 100, SimpleNamespace(id=10), True)
+        error = await begin_reading(bot, 100, SimpleNamespace(id=10, members=[]), True)
         return bot, error
 
     bot, error = asyncio.run(scenario())
@@ -384,7 +388,7 @@ def test_begin_reading_refuses_a_voice_channel_reading_elsewhere():
     # 1 つのボイスチャンネルで 2 つのテキストチャンネルを読むと、誰の発言か分からなくなる
     async def scenario():
         bot = make_begin_bot(existing=make_state(text_channel_id=555, voice_channel_id=10))
-        error = await begin_reading(bot, 100, SimpleNamespace(id=10), False)
+        error = await begin_reading(bot, 100, SimpleNamespace(id=10, members=[]), False)
         return bot, error
 
     bot, error = asyncio.run(scenario())
@@ -405,7 +409,7 @@ def test_begin_reading_yields_when_another_channel_wins_the_race():
 
         bot = make_begin_bot(acquire=acquire)
         holder["bot"] = bot
-        error = await begin_reading(bot, 100, SimpleNamespace(id=10), False)
+        error = await begin_reading(bot, 100, SimpleNamespace(id=10, members=[]), False)
         return bot, error
 
     bot, error = asyncio.run(scenario())
@@ -419,7 +423,7 @@ def test_begin_reading_reports_when_no_slot_is_free():
         bot = make_begin_bot(
             acquire=AsyncMock(side_effect=VoiceSlotUnavailable("1 つまでです"))
         )
-        return await begin_reading(bot, 100, SimpleNamespace(id=10), False)
+        return await begin_reading(bot, 100, SimpleNamespace(id=10, members=[]), False)
 
     assert asyncio.run(scenario()) == "1 つまでです"
 
@@ -440,8 +444,8 @@ def make_voice_cog(states, members=()):
     return Tts(bot), manager, panel
 
 
-def move(before_id, after_id, name="はなこ", is_bot=False):
-    member = SimpleNamespace(bot=is_bot, display_name=name, guild=SimpleNamespace(id=1))
+def move(before_id, after_id, name="はなこ", is_bot=False, user_id=7):
+    member = SimpleNamespace(id=user_id, bot=is_bot, display_name=name, guild=SimpleNamespace(id=1))
     channel = lambda cid: None if cid is None else SimpleNamespace(id=cid)
     return member, SimpleNamespace(channel=channel(before_id)), SimpleNamespace(channel=channel(after_id))
 
@@ -490,30 +494,6 @@ def test_mute_toggle_is_ignored():
     assert manager.is_target_channel(1, 100) is True
 
 
-# ---- /読み上げ終了 の対象 ----
-
-def make_stop_interaction(channel_id, voice_channel_id=None):
-    voice = None if voice_channel_id is None else SimpleNamespace(channel=SimpleNamespace(id=voice_channel_id))
-    return SimpleNamespace(guild_id=1, channel_id=channel_id, user=SimpleNamespace(voice=voice))
-
-
-def test_stop_targets_this_text_channel_first():
-    cog, _, _ = make_voice_cog([make_state(text_channel_id=100, voice_channel_id=10)])
-    assert cog._reading_target(make_stop_interaction(100, voice_channel_id=11)) == 100
-
-
-def test_stop_falls_back_to_the_reading_in_your_voice_channel():
-    # 読み上げ対象以外のチャンネルで実行しても、自分のいるボイスチャンネルの読み上げを止められる
-    cog, _, _ = make_voice_cog([make_state(text_channel_id=100, voice_channel_id=10)])
-    assert cog._reading_target(make_stop_interaction(999, voice_channel_id=10)) == 100
-
-
-def test_stop_has_no_target_outside_any_reading():
-    cog, _, _ = make_voice_cog([make_state(text_channel_id=100, voice_channel_id=10)])
-    assert cog._reading_target(make_stop_interaction(999)) is None
-
-
-
 def test_join_leave_notice_defaults_off_and_can_be_switched():
     manager = TtsManager(engine=Mock(), store=Mock())
     assert manager.join_leave_notice(5) is False
@@ -521,3 +501,60 @@ def test_join_leave_notice_defaults_off_and_can_be_switched():
     assert manager.join_leave_notice(5) is True
     # 他のチャンネルの設定には影響しない
     assert manager.join_leave_notice(6) is False
+
+
+# ---- 話者の事前読み込み(VC 参加時) ----
+
+def test_engine_initialize_speaker_posts_with_skip_reinit():
+    async def scenario():
+        engine = VoicevoxEngine(base_url="http://voicevox:50021", default_speaker=3)
+        session = FakeSession([FakeResponse()])
+        with patch("src.tts_engine.aiohttp.ClientSession", return_value=session):
+            await engine.initialize_speaker(8)
+        url, params, _ = session.calls[0]
+        assert url.endswith("/initialize_speaker")
+        assert params == {"speaker": 8, "skip_reinit": "true"}
+
+    asyncio.run(scenario())
+
+
+def test_begin_reading_warms_default_and_members_speakers():
+    # 接続を待つ間に、既定話者と今いる人の話者(人間だけ)を読み込ませる
+    async def scenario():
+        bot = make_begin_bot()
+        bot.tts_manager.set_speaker(11, 8)
+        members = [
+            SimpleNamespace(id=11, bot=False),
+            SimpleNamespace(id=12, bot=False),
+            SimpleNamespace(id=13, bot=True),
+        ]
+        await begin_reading(bot, 100, SimpleNamespace(id=10, members=members), False)
+        await asyncio.sleep(0)
+        return bot
+
+    bot = asyncio.run(scenario())
+    assert sorted(bot.tts_manager.engine.warmed) == [3, 8]
+
+
+def test_warm_failure_does_not_break_reading():
+    async def scenario():
+        manager = TtsManager(engine=FakeEngine(), store=make_store())
+        manager.engine.initialize_speaker = AsyncMock(side_effect=RuntimeError("down"))
+        manager.warm_speakers([3])
+        # 失敗は握りつぶされ、タスクは例外なしで終わる
+        await asyncio.gather(*manager._warm_tasks)
+
+    asyncio.run(scenario())
+
+
+def test_joining_member_speaker_is_warmed_on_reading_channel():
+    state = make_state(text_channel_id=100, voice_channel_id=10)
+    cog, manager, _ = make_voice_cog([state], members=[])
+    manager.set_speaker(7, 81)
+
+    async def scenario():
+        await cog.on_voice_state_update(*move(None, 10, user_id=7))
+        await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+    assert manager.engine.warmed == [81]

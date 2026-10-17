@@ -29,7 +29,7 @@ from src.modules.panel import (
     make_voice_embed,
 )
 from src.panel_store import PanelStore
-from src.modules.tts import SPEAKER_CHOICES, SPEAKERS
+from src.modules.tts import SPEAKERS
 
 
 def test_build_number_values_team_starts_at_two():
@@ -75,13 +75,13 @@ def test_voice_select_view_pairs_speaker_with_preview():
         speakers = view.children[0::2]
         previews = view.children[1::2]
         # 各話者が「話者ボタン + 試聴ボタン」の 2 つを持つこと
-        assert len(view.children) == len(SPEAKER_CHOICES) * 2
+        assert len(view.children) == len(SPEAKERS) * 2
         assert all(isinstance(b, VoiceButton) for b in speakers)
         assert all(isinstance(b, VoicePreviewButton) for b in previews)
-        for index, choice in enumerate(SPEAKER_CHOICES):
+        for index, speaker in enumerate(SPEAKERS):
             # 話者と試聴が同じ行に隣接し、同じ話者を指すこと
-            assert speakers[index].label == choice.name
-            assert speakers[index].speaker_value == choice.value
+            assert speakers[index].label == speaker.name
+            assert speakers[index].speaker_value == speaker.id
             assert speakers[index].row == previews[index].row
             # 1 行に 2 話者ずつ並べること
             assert speakers[index].row == index // 2
@@ -150,7 +150,6 @@ def test_speaker_names_are_unique_and_without_emotion_labels():
     assert len(set(names)) == len(names)
     # 感情名(喜び 等)は表示名に出さず、説明側で伝えること
     assert not any("喜び" in name or "熱血" in name for name in names)
-    assert [choice.name for choice in SPEAKER_CHOICES] == names
 
 
 def test_run_preview_voice_defers_and_sends_sample_file():
@@ -262,6 +261,8 @@ def test_toggle_tts_stops_only_on_target_channel():
 def make_tts_interaction():
     interaction = Mock()
     interaction.channel_id = 100
+    # 実際の VoiceChannel と同じく、いまVCにいる人の一覧を持たせる
+    interaction.user.voice.channel.members = []
     interaction.response.defer = AsyncMock()
     interaction.response.send_message = AsyncMock()
     interaction.followup.send = AsyncMock()
