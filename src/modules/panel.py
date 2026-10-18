@@ -16,7 +16,6 @@ MEMBER_BUTTON_LIMIT_MULTI = 15  # 抽選(数値行 + 複数選択 + 実行)で�
 MEMBER_BUTTON_LIMIT_DELETE = 20  # 解除系(複数選択 + 実行)でボタン表示する上限
 SELECT_OPTION_LIMIT = 25  # Discord の 1 セレクトあたりの選択肢上限
 MAX_SELECT_ROWS = 5  # Discord の 1 View あたりの行数上限
-MAX_PANEL_GUILDS = 2  # 同時にパネルを設置できるサーバー数
 MAX_PANELS_PER_GUILD = 2  # 1 サーバーあたりでパネルを設置できるチャンネル数
 
 
@@ -688,7 +687,7 @@ class PanelCog(commands.Cog):
     guild_ids_raw = os.getenv("GUILD_IDS", "")
     GUILD_IDS = [int(gid.strip()) for gid in guild_ids_raw.split(",") if gid]
 
-    # 同時に設置できるパネルを「2 サーバー × 各 2 チャンネル」に制限する。
+    # 1 サーバーに設置できるパネルを「各 2 チャンネル」に制限する。
     # 上限超過は黙って弾かず、今どこで開いているかと閉じ方を返す
     def check_panel_capacity(self, channel):
         locations = self.panel_store.load_panels()
@@ -701,13 +700,6 @@ class PanelCog(commands.Cog):
             return (
                 f"このサーバーでは既に {MAX_PANELS_PER_GUILD} チャンネルでパネルを開いています"
                 f"({opened})。どちらかで `/パネル終了` を実行してから設置してください。"
-            )
-        guild_ids = {gid for gid, _ in locations.values()}
-        # 既にパネルを置いているサーバーなら、サーバー数は増えないので通す
-        if guild_id not in guild_ids and len(guild_ids) >= MAX_PANEL_GUILDS:
-            return (
-                f"同時にパネルを置けるのは {MAX_PANEL_GUILDS} サーバーまでです。"
-                "他のサーバーで `/パネル終了` を実行してから設置してください。"
             )
         return None
 

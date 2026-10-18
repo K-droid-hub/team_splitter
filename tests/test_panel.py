@@ -10,7 +10,6 @@ import discord
 
 from src.modules.panel import (
     MAX_PANELS_PER_GUILD,
-    MAX_PANEL_GUILDS,
     MEMBER_BUTTON_LIMIT_DELETE,
     MEMBER_BUTTON_LIMIT_MULTI,
     MEMBER_BUTTON_LIMIT_SINGLE,
@@ -471,7 +470,7 @@ def test_timeout_without_binding_is_silent():
     asyncio.run(scenario())
 
 
-# ---- パネルは 2 サーバー × 各 2 チャンネルまで ----
+# ---- パネルは 1 サーバーあたり 2 チャンネルまで(サーバー数は無制限) ----
 
 def test_check_panel_capacity_limits_channels_per_guild():
     cog = make_cog()
@@ -489,14 +488,15 @@ def test_check_panel_capacity_limits_channels_per_guild():
     assert cog.check_panel_capacity(make_channel(103, guild_id=1)) is None
 
 
-def test_check_panel_capacity_limits_guild_count():
+def test_check_panel_capacity_allows_many_guilds():
     cog = make_cog()
     cog.panel_store.set_panel(1, 101, 9001)
     cog.panel_store.set_panel(2, 201, 9002)
+    cog.panel_store.set_panel(3, 301, 9003)
 
-    error = cog.check_panel_capacity(make_channel(301, guild_id=3))
-    assert error is not None and f"{MAX_PANEL_GUILDS} サーバー" in error
-    # 既に使っているサーバーなら 2 チャンネル目まで置けること
+    # サーバー数に上限はなく、3 つ目以降のサーバーでも設置できること
+    assert cog.check_panel_capacity(make_channel(401, guild_id=4)) is None
+    # 各サーバーのチャンネル上限は従来どおり効くこと
     assert cog.check_panel_capacity(make_channel(102, guild_id=1)) is None
 
 
